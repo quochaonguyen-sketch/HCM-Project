@@ -1,0 +1,1043 @@
+<!-- FLM Rider & FTE Resource Frontend Module -->
+<style>
+.flmp { font-family: inherit; color: inherit; position: relative; }
+.flmp-head { margin-bottom: 16px; }
+.flmp-title { font-size: 22px; font-weight: 700; color: #0b2343; margin: 0 0 4px 0; }
+.flmp-subtitle { color: #64748b; font-size: 13px; margin: 0; }
+
+/* Compact Modern Filter Toolbar */
+.flmp-filter-bar {
+  display: flex !important;
+  align-items: center !important;
+  flex-wrap: wrap !important;
+  gap: 8px 14px !important;
+  background: #fff !important;
+  border: 1px solid #dfe7f0 !important;
+  border-radius: 10px !important;
+  padding: 8px 14px !important;
+  margin: 10px 0 16px !important;
+  box-shadow: 0 1px 3px rgba(0,0,0,0.02) !important;
+  box-sizing: border-box !important;
+}
+.flmp-filter-group {
+  display: inline-flex !important;
+  align-items: center !important;
+  gap: 6px !important;
+}
+.flmp-filter-group small {
+  font-size: 11px !important;
+  font-weight: 700 !important;
+  text-transform: uppercase !important;
+  letter-spacing: 0.5px !important;
+  color: #64748b !important;
+  white-space: nowrap !important;
+}
+.flmp-filter-group select,
+.flmp-filter-group input[type="date"] {
+  height: 32px !important;
+  min-height: 32px !important;
+  max-height: 32px !important;
+  padding: 0 10px !important;
+  font-size: 12px !important;
+  font-weight: 500 !important;
+  color: #0b2343 !important;
+  background: #f8fafc !important;
+  border: 1px solid #cbd5e1 !important;
+  border-radius: 6px !important;
+  outline: none !important;
+  cursor: pointer !important;
+  box-shadow: none !important;
+  box-sizing: border-box !important;
+  transition: all 0.15s ease !important;
+}
+.flmp-filter-group select:hover,
+.flmp-filter-group input[type="date"]:hover {
+  background: #fff !important;
+  border-color: #94a3b8 !important;
+}
+.flmp-filter-group select:focus,
+.flmp-filter-group input[type="date"]:focus {
+  background: #fff !important;
+  border-color: #0052cc !important;
+  box-shadow: 0 0 0 2px rgba(0,82,204,0.12) !important;
+}
+.flmp-scope-badge {
+  display: inline-flex !important;
+  align-items: center !important;
+  height: 32px !important;
+  padding: 0 10px !important;
+  background: #f1f5f9 !important;
+  border: 1px solid #e2e8f0 !important;
+  border-radius: 6px !important;
+  font-size: 12px !important;
+  font-weight: 600 !important;
+  color: #334155 !important;
+  white-space: nowrap !important;
+}
+.flmp-today-btn {
+  height: 32px !important;
+  padding: 0 10px !important;
+  font-size: 12px !important;
+  font-weight: 600 !important;
+  color: #0052cc !important;
+  background: #e9f2ff !important;
+  border: 1px solid #cce0ff !important;
+  border-radius: 6px !important;
+  cursor: pointer !important;
+  transition: all 0.15s ease !important;
+  white-space: nowrap !important;
+}
+.flmp-today-btn:hover {
+  background: #0052cc !important;
+  color: #fff !important;
+}
+.flmp-refresh-btn {
+  margin-left: auto !important;
+  height: 32px !important;
+  min-height: 32px !important;
+  padding: 0 14px !important;
+  font-size: 12px !important;
+  font-weight: 600 !important;
+  color: #fff !important;
+  background: #0052cc !important;
+  border: 1px solid #0052cc !important;
+  border-radius: 6px !important;
+  display: inline-flex !important;
+  align-items: center !important;
+  gap: 6px !important;
+  cursor: pointer !important;
+  box-shadow: none !important;
+  transition: background 0.15s ease, transform 0.1s ease !important;
+  white-space: nowrap !important;
+}
+.flmp-refresh-btn:hover {
+  background: #0747a6 !important;
+  border-color: #0747a6 !important;
+}
+.flmp-refresh-btn:active {
+  transform: scale(0.98) !important;
+}
+.flmp-refresh-btn svg {
+  width: 14px !important;
+  height: 14px !important;
+}
+
+/* KPI Cards */
+.flmp-cards { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 14px; margin: 16px 0; }
+.flmp-card { background: #fff; border: 1px solid #dfe7f0; border-radius: 12px; padding: 18px 20px; box-shadow: 0 1px 3px rgba(0,0,0,0.03); transition: transform 0.15s ease, box-shadow 0.15s ease; position: relative; overflow: hidden; display: flex; flex-direction: column; justify-content: space-between; }
+.flmp-card:hover { transform: translateY(-2px); box-shadow: 0 6px 16px rgba(0,0,0,0.06); }
+.flmp-card-bar { position: absolute; top: 0; left: 0; right: 0; height: 4px; }
+.flmp-card-active .flmp-card-bar { background: #0052cc; }
+.flmp-card-joined .flmp-card-bar { background: #00875a; }
+.flmp-card-last .flmp-card-bar { background: #de350b; }
+.flmp-card-unknown .flmp-card-bar { background: #6554c0; }
+.flmp-card-top { display: flex; align-items: center; justify-content: space-between; }
+.flmp-card-label { font-size: 12px; font-weight: 600; color: #6b778c; text-transform: uppercase; letter-spacing: 0.5px; }
+.flmp-card-icon { width: 32px; height: 32px; border-radius: 8px; display: flex; align-items: center; justify-content: center; }
+.flmp-card-active .flmp-card-icon { background: #e9f2ff; color: #0052cc; }
+.flmp-card-joined .flmp-card-icon { background: #e3fcef; color: #00875a; }
+.flmp-card-last .flmp-card-icon { background: #ffebe6; color: #de350b; }
+.flmp-card-unknown .flmp-card-icon { background: #eae6ff; color: #6554c0; }
+.flmp-card-value { font-size: 30px; font-weight: 700; color: #0b2343; margin-top: 8px; }
+.flmp-card-sub { font-size: 11px; color: #8993a4; margin-top: 6px; }
+
+/* Flow summary badge bar */
+.flmp-flow-bar { display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap; background: #fff; border: 1px solid #dfe7f0; border-radius: 10px; padding: 12px 18px; margin: 14px 0 20px; box-shadow: 0 1px 3px rgba(0,0,0,0.02); }
+.flmp-flow-item { display: inline-flex; align-items: center; gap: 8px; font-size: 13px; color: #334155; }
+.flmp-flow-pill { padding: 3px 10px; border-radius: 12px; font-weight: 700; font-size: 12px; }
+.flmp-flow-pill.is-pos { background: #e3fcef; color: #00875a; }
+.flmp-flow-pill.is-neg { background: #ffebe6; color: #de350b; }
+.flmp-flow-pill.is-neu { background: #f1f5f9; color: #475569; }
+
+/* Collapsible Notice */
+.flmp-notice-accordion { background: #fff8f5; border: 1px solid #fed7aa; border-radius: 8px; margin: 12px 0; overflow: hidden; }
+.flmp-notice-summary { padding: 10px 14px; font-size: 12px; font-weight: 600; color: #9a3412; cursor: pointer; display: flex; align-items: center; justify-content: space-between; user-select: none; }
+.flmp-notice-summary:hover { background: #fff2ea; }
+.flmp-notice-body { padding: 0 14px 12px; font-size: 12px; color: #7c2d12; line-height: 1.5; border-top: 1px solid #ffedd5; }
+.flmp-notice-body ul { margin: 8px 0 0; padding-left: 18px; }
+.flmp-notice-body li { margin-bottom: 4px; }
+
+/* Visual Charts Section */
+.flmp-analytics { display: grid; grid-template-columns: 2fr 1fr; gap: 16px; margin: 20px 0; }
+@media (max-width: 992px) {
+  .flmp-analytics { grid-template-columns: 1fr; }
+}
+.flmp-chart-box { background: #fff; border: 1px solid #dfe7f0; border-radius: 12px; padding: 18px 20px; box-shadow: 0 1px 3px rgba(0,0,0,0.03); display: flex; flex-direction: column; }
+.flmp-chart-head { display: flex; align-items: center; justify-content: space-between; margin-bottom: 14px; flex-wrap: wrap; gap: 10px; }
+.flmp-chart-title { font-size: 15px; font-weight: 700; color: #0b2343; margin: 0; }
+.flmp-chart-tabs { display: inline-flex; background: #f1f5f9; padding: 3px; border-radius: 8px; gap: 4px; }
+.flmp-chart-tab { padding: 4px 10px; border: none; background: transparent; font-size: 12px; font-weight: 600; color: #64748b; border-radius: 6px; cursor: pointer; transition: all 0.15s ease; }
+.flmp-chart-tab.is-active { background: #fff; color: #0052cc; box-shadow: 0 1px 3px rgba(0,0,0,0.08); }
+.flmp-bars-container { display: flex; flex-direction: column; gap: 10px; max-height: 380px; overflow-y: auto; padding-right: 6px; }
+.flmp-bar-row { display: grid; grid-template-columns: 170px 1fr 65px; align-items: center; gap: 10px; cursor: pointer; padding: 4px 8px; border-radius: 6px; transition: background 0.15s ease; }
+.flmp-bar-row:hover { background: #f8fafc; }
+.flmp-bar-row:hover .flmp-bar-name { color: #0052cc; font-weight: 700; }
+.flmp-bar-name { font-size: 12px; font-weight: 600; color: #334155; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.flmp-bar-track { background: #f1f5f9; height: 18px; border-radius: 4px; overflow: hidden; position: relative; }
+.flmp-bar-fill { height: 100%; border-radius: 4px; transition: width 0.3s ease; }
+.flmp-bar-val { font-size: 12px; font-weight: 700; color: #0b2343; text-align: right; }
+
+/* Status composition card */
+.flmp-comp-bars { display: flex; flex-direction: column; gap: 16px; margin-top: 10px; }
+.flmp-comp-stack { height: 26px; border-radius: 6px; overflow: hidden; display: flex; width: 100%; box-shadow: inset 0 1px 2px rgba(0,0,0,0.06); }
+.flmp-comp-slice { height: 100%; transition: width 0.3s ease; }
+.flmp-comp-legend { display: flex; flex-direction: column; gap: 10px; margin-top: 10px; }
+.flmp-comp-item { display: flex; align-items: center; justify-content: space-between; font-size: 12px; color: #475569; }
+.flmp-comp-dot { width: 10px; height: 10px; border-radius: 3px; display: inline-block; margin-right: 6px; }
+
+/* Toolbar & Table */
+.flmp-toolbar { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin: 24px 0 12px; flex-wrap: wrap; }
+.flmp-search-box { position: relative; min-width: 260px; max-width: 380px; flex: 1; }
+.flmp-search-box input { width: 100%; padding: 8px 12px 8px 34px; border: 1px solid #dfe7f0; border-radius: 8px; font-size: 13px; outline: none; background: #fff; box-sizing: border-box; }
+.flmp-search-box input:focus { border-color: #0052cc; box-shadow: 0 0 0 2px rgba(0,82,204,0.15); }
+.flmp-search-icon { position: absolute; left: 10px; top: 50%; transform: translateY(-50%); width: 16px; height: 16px; color: #8993a4; pointer-events: none; }
+.flmp-count-badge { font-size: 12px; color: #6b778c; }
+.flmp-scroll { overflow-x: auto; max-height: 560px; background: #fff; border: 1px solid #dfe7f0; border-radius: 10px; box-shadow: 0 1px 3px rgba(0,0,0,0.03); }
+.flmp table { border-collapse: collapse; min-width: 920px; width: 100%; font-size: 13px; }
+.flmp th, .flmp td { padding: 11px 16px; border-bottom: 1px solid #dfe7f0; white-space: nowrap; text-align: right; }
+.flmp th:first-child, .flmp td:first-child { text-align: left; min-width: 240px; font-weight: 600; }
+.flmp th { background: #f4f7fb; position: sticky; top: 0; font-weight: 600; color: #42526e; cursor: pointer; user-select: none; z-index: 1; }
+.flmp th:hover { background: #eaeff5; }
+.flmp th.is-sorted { color: #0052cc; background: #e9f2ff; }
+.flmp th .sort-arrow { display: inline-block; margin-left: 4px; font-size: 10px; }
+.flmp tr.flmp-row { cursor: pointer; transition: background 0.12s ease; }
+.flmp tr.flmp-row:hover td { background: #f1f7ff; }
+.flmp tr.flmp-row:hover td:first-child { color: #0052cc; text-decoration: underline; }
+.flmp tfoot td { font-weight: 700; background: #f8fafc; border-top: 2px solid #cbd5e1; border-bottom: none; }
+.flmp-action-btn { padding: 3px 8px; font-size: 11px; font-weight: 600; color: #0052cc; background: #e9f2ff; border: 1px solid #b3d4ff; border-radius: 4px; cursor: pointer; }
+.flmp-action-btn:hover { background: #0052cc; color: #fff; }
+
+/* Hub Detail Modal */
+.flmp-modal-overlay { position: fixed; top: 0; left: 0; right: 0; bottom: 0; background: rgba(11,35,67,0.5); backdrop-filter: blur(3px); z-index: 99999; display: flex; align-items: center; justify-content: center; padding: 20px; animation: flmp-fade 0.15s ease; }
+@keyframes flmp-fade { from { opacity: 0; } to { opacity: 1; } }
+.flmp-modal { background: #fff; border-radius: 14px; width: 100%; max-width: 820px; max-height: 90vh; overflow-y: auto; box-shadow: 0 16px 40px rgba(0,0,0,0.2); display: flex; flex-direction: column; animation: flmp-slide 0.2s cubic-bezier(0.16, 1, 0.3, 1); }
+@keyframes flmp-slide { from { transform: translateY(20px) scale(0.98); opacity: 0; } to { transform: translateY(0) scale(1); opacity: 1; } }
+.flmp-modal-head { padding: 18px 24px; border-bottom: 1px solid #e2e8f0; display: flex; align-items: center; justify-content: space-between; }
+.flmp-modal-head h3 { margin: 0; font-size: 18px; color: #0b2343; font-weight: 700; display: flex; align-items: center; gap: 8px; }
+.flmp-modal-close { background: none; border: none; font-size: 22px; color: #64748b; cursor: pointer; border-radius: 6px; width: 32px; height: 32px; display: flex; align-items: center; justify-content: center; }
+.flmp-modal-close:hover { background: #f1f5f9; color: #0f172a; }
+
+/* Modal tabs */
+.flmp-modal-nav { display: flex; gap: 8px; padding: 12px 24px 0; border-bottom: 1px solid #e2e8f0; background: #fafbfc; }
+.flmp-modal-tab { padding: 8px 16px; border: none; background: transparent; font-size: 13px; font-weight: 600; color: #64748b; border-bottom: 2px solid transparent; cursor: pointer; transition: all 0.15s ease; }
+.flmp-modal-tab:hover { color: #0052cc; }
+.flmp-modal-tab.is-active { color: #0052cc; border-bottom-color: #0052cc; }
+
+.flmp-modal-body { padding: 20px 24px; display: flex; flex-direction: column; gap: 18px; }
+.flmp-modal-grid { display: grid; grid-template-columns: repeat(2, 1fr); gap: 12px; }
+.flmp-modal-stat { background: #f8fafc; border: 1px solid #e2e8f0; border-radius: 10px; padding: 14px; }
+.flmp-modal-stat small { display: block; font-size: 11px; text-transform: uppercase; font-weight: 600; color: #64748b; margin-bottom: 4px; }
+.flmp-modal-stat strong { display: block; font-size: 24px; font-weight: 700; color: #0b2343; }
+.flmp-modal-analysis { background: #eff6ff; border: 1px solid #bfdbfe; border-radius: 10px; padding: 14px 18px; font-size: 13px; color: #1e40af; line-height: 1.5; }
+.flmp-modal-foot { padding: 14px 24px; border-top: 1px solid #e2e8f0; display: flex; justify-content: flex-end; gap: 10px; background: #f8fafc; border-radius: 0 0 14px 14px; }
+
+/* Roster / Raw data styling */
+.flmp-roster-controls { display: flex; align-items: center; justify-content: space-between; gap: 10px; flex-wrap: wrap; margin-bottom: 12px; }
+.flmp-roster-pills { display: flex; gap: 6px; flex-wrap: wrap; }
+.flmp-roster-pill { padding: 4px 10px; border-radius: 14px; border: 1px solid #dfe7f0; background: #fff; font-size: 12px; font-weight: 600; color: #475569; cursor: pointer; }
+.flmp-roster-pill:hover { background: #f1f5f9; }
+.flmp-roster-pill.is-active { background: #0052cc; color: #fff; border-color: #0052cc; }
+.flmp-roster-search { position: relative; min-width: 200px; flex: 1; max-width: 280px; }
+.flmp-roster-search input { width: 100%; padding: 6px 10px 6px 30px; border: 1px solid #dfe7f0; border-radius: 6px; font-size: 12px; outline: none; }
+.flmp-roster-search svg { position: absolute; left: 8px; top: 50%; transform: translateY(-50%); width: 14px; height: 14px; color: #94a3b8; }
+.flmp-roster-export { padding: 6px 12px; border: 1px solid #cbd5e1; border-radius: 6px; background: #fff; font-size: 12px; font-weight: 600; color: #1e293b; cursor: pointer; display: inline-flex; align-items: center; gap: 6px; }
+.flmp-roster-export:hover { background: #f8fafc; border-color: #94a3b8; }
+.flmp-roster-table-wrap { overflow-x: auto; max-height: 420px; border: 1px solid #e2e8f0; border-radius: 8px; }
+.flmp-roster-table { border-collapse: collapse; width: 100%; font-size: 12px; min-width: 600px; }
+.flmp-roster-table th, .flmp-roster-table td { padding: 9px 12px; border-bottom: 1px solid #e2e8f0; text-align: left; }
+.flmp-roster-table th { background: #f8fafc; font-weight: 600; color: #475569; position: sticky; top: 0; z-index: 1; }
+.flmp-roster-badge { display: inline-block; padding: 2px 8px; border-radius: 10px; font-size: 11px; font-weight: 600; }
+.flmp-roster-badge.badge-active { background: #e3fcef; color: #00875a; }
+.flmp-roster-badge.badge-joined { background: #e9f2ff; color: #0052cc; }
+.flmp-roster-badge.badge-lastwork { background: #fff3ef; color: #de350b; }
+.flmp-roster-badge.badge-exited { background: #f1f5f9; color: #64748b; }
+.flmp-roster-badge.badge-unknown { background: #eae6ff; color: #6554c0; }
+.flmp-pagination { display: flex; align-items: center; justify-content: space-between; padding-top: 8px; font-size: 12px; color: #64748b; }
+.flmp-page-btn { padding: 4px 10px; border: 1px solid #cbd5e1; border-radius: 4px; background: #fff; font-size: 12px; cursor: pointer; }
+.flmp-page-btn:disabled { opacity: 0.4; cursor: not-allowed; }
+
+.flmp-btn { padding: 8px 16px; border-radius: 6px; font-size: 13px; font-weight: 600; cursor: pointer; border: none; }
+.flmp-btn-primary { background: #0052cc; color: #fff; }
+.flmp-btn-primary:hover { background: #0747a6; }
+.flmp-btn-secondary { background: #e2e8f0; color: #334155; }
+.flmp-btn-secondary:hover { background: #cbd5e1; }
+
+.flmp-empty { padding: 48px 20px; text-align: center; color: #69778a; background: #fff; border-radius: 10px; border: 1px dashed #dfe7f0; margin: 16px 0; }
+.flmp-empty b { display: block; font-size: 16px; color: #1e293b; margin-bottom: 6px; }
+.flmp-loading { padding: 50px 20px; text-align: center; color: #475569; background: #fff; border-radius: 10px; border: 1px solid #dfe7f0; margin: 16px 0; }
+.flmp-spinner { width: 32px; height: 32px; border: 3px solid #e2e8f0; border-top-color: #0052cc; border-radius: 50%; animation: flmp-spin 0.8s linear infinite; margin: 0 auto 12px; }
+@keyframes flmp-spin { to { transform: rotate(360deg); } }
+</style>
+<script>
+window.FLM_PeopleModule = (function () {
+  var versions = new WeakMap();
+  var tableState = {
+    search: '',
+    sortCol: 'active',
+    sortAsc: false,
+    chartMetric: 'active', // 'active' | 'joined_period' | 'last_work_day_period' | 'net_change'
+    chartLimit: 12
+  };
+
+  function el(tag, text, cls) {
+    var elem = document.createElement(tag);
+    if (text != null) elem.textContent = text;
+    if (cls) elem.className = cls;
+    return elem;
+  }
+
+  function formatNum(n) {
+    return Number(n || 0).toLocaleString('vi-VN');
+  }
+
+  function elEscape(s) {
+    return String(s || '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+  }
+
+  function exportRosterCsv(rows, station, moduleName) {
+    var header = ['STT', 'Mã nhân viên', 'Họ và tên', 'Vị trí', 'Hub', 'Ngày nhận việc', 'Ngày làm việc cuối', 'Trạng thái', 'Chất lượng'];
+    var lines = [header.join(',')];
+    rows.forEach(function (r, i) {
+      var statusLabel = r.status === 'ACTIVE' ? 'Đang làm việc' : (r.status === 'EXITED' ? 'Đã nghỉ việc' : (r.status === 'NOT_JOINED' ? 'Chưa nhận việc' : 'Chưa xác định'));
+      lines.push([
+        i + 1,
+        '"' + (r.employee_id || '') + '"',
+        '"' + (r.employee_name || '') + '"',
+        '"' + (r.position || '') + '"',
+        '"' + (r.station || '') + '"',
+        '"' + (r.join_date || '') + '"',
+        '"' + (r.last_work_date || '') + '"',
+        '"' + statusLabel + '"',
+        '"' + (r.quality || '') + '"'
+      ].join(','));
+    });
+    var csvContent = '\uFEFF' + lines.join('\r\n');
+    var blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
+    var url = URL.createObjectURL(blob);
+    var a = document.createElement('a');
+    a.href = url;
+    a.download = (station || 'HUB').replace(/[\/\s]+/g, '_') + '_' + moduleName + '_Roster.csv';
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    URL.revokeObjectURL(url);
+  }
+
+  function openHubModal(root, hubRow, p) {
+    closeHubModal();
+    var isRider = p.module === 'RIDER';
+    var active = Number(hubRow.active || 0);
+    var joined = Number(hubRow.joined_period || 0);
+    var lastWork = Number(hubRow.last_work_day_period || 0);
+    var netChange = joined - lastWork;
+    var exited = Number(hubRow.exited_before_anchor || 0);
+    var unknown = Number(hubRow.unknown_records || 0);
+    var totalRecords = Number(hubRow.records || (active + exited + unknown));
+
+    var turnoverRate = active > 0 ? ((lastWork / active) * 100).toFixed(1) + '%' : '0%';
+    var joinRate = active > 0 ? ((joined / active) * 100).toFixed(1) + '%' : '0%';
+
+    var overlay = el('div', null, 'flmp-modal-overlay');
+    overlay.id = 'flmpHubModal';
+    overlay.onclick = function (e) {
+      if (e.target === overlay) closeHubModal();
+    };
+
+    var modal = el('div', null, 'flmp-modal');
+    var head = el('div', null, 'flmp-modal-head');
+    head.innerHTML = '<h3><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#0052cc" stroke-width="2"><rect x="3" y="3" width="7" height="7" rx="1.5"/><rect x="14" y="3" width="7" height="7" rx="1.5"/><rect x="3" y="14" width="7" height="7" rx="1.5"/><rect x="14" y="14" width="7" height="7" rx="1.5"/></svg>' +
+      elEscape(hubRow.station) + '</h3>';
+    var closeBtn = el('button', '×', 'flmp-modal-close');
+    closeBtn.onclick = closeHubModal;
+    head.append(closeBtn);
+    modal.append(head);
+
+    // Modal Tab Navigation
+    var nav = el('div', null, 'flmp-modal-nav');
+    var tabOverview = el('button', '📊 Chỉ số & Phân tích', 'flmp-modal-tab is-active');
+    var tabRoster = el('button', '👥 Danh sách nhân sự tại Hub (Raw Data)', 'flmp-modal-tab');
+    nav.append(tabOverview, tabRoster);
+    modal.append(nav);
+
+    var body = el('div', null, 'flmp-modal-body');
+
+    // Tab 1: Overview
+    var viewOverview = el('div');
+    var grid = el('div', null, 'flmp-modal-grid');
+    grid.innerHTML = '<div class="flmp-modal-stat" style="border-left:4px solid #0052cc;">' +
+      '<small>Đang làm việc</small><strong>' + formatNum(active) + ' ' + (isRider ? 'Rider' : 'Staff') + '</strong></div>' +
+      '<div class="flmp-modal-stat" style="border-left:4px solid #00875a;">' +
+      '<small>Nhận việc (30 ngày)</small><strong style="color:#00875a;">+' + formatNum(joined) + '</strong></div>' +
+      '<div class="flmp-modal-stat" style="border-left:4px solid #de350b;">' +
+      '<small>Ngày làm cuối (30 ngày)</small><strong style="color:#de350b;">' + formatNum(lastWork) + '</strong></div>' +
+      '<div class="flmp-modal-stat" style="border-left:4px solid #6554c0;">' +
+      '<small>Đã nghỉ trước kỳ</small><strong>' + formatNum(exited) + '</strong></div>';
+    viewOverview.append(grid);
+
+    var analysis = el('div', null, 'flmp-modal-analysis');
+    var netBadge = netChange > 0 ? '<span style="color:#00875a;font-weight:700;">+' + netChange + ' (Tăng trưởng)</span>' :
+      (netChange < 0 ? '<span style="color:#de350b;font-weight:700;">' + netChange + ' (Giảm)</span>' : '<span style="color:#475569;font-weight:700;">0 (Ổn định)</span>');
+    analysis.innerHTML = '<strong>Phân tích biến động tại Hub:</strong><br>' +
+      '• Biến động ròng trong kỳ: ' + netBadge + '<br>' +
+      '• Tỷ lệ tuyển mới ước tính: <b>' + joinRate + '</b> | Tỷ lệ nghỉ việc ước tính: <b>' + turnoverRate + '</b><br>' +
+      '• Tổng số hồ sơ ghi nhận: <b>' + formatNum(totalRecords) + '</b>' + (unknown > 0 ? ' (có <b style="color:#de350b;">' + unknown + '</b> hồ sơ chưa chuẩn hóa)' : ' (dữ liệu sạch)');
+    analysis.style.marginTop = '14px';
+    viewOverview.append(analysis);
+    body.append(viewOverview);
+
+    // Tab 2: Roster / Raw Data
+    var viewRoster = el('div');
+    viewRoster.style.display = 'none';
+
+    var rosterLoaded = false;
+    var rosterRows = [];
+    var rosterFilter = 'ALL';
+    var rosterSearch = '';
+    var rosterPage = 1;
+    var pageSize = 15;
+
+    var rosterControls = el('div', null, 'flmp-roster-controls');
+    var pillsContainer = el('div', null, 'flmp-roster-pills');
+    var pillDefs = [
+      { key: 'ALL', label: 'Tất cả' },
+      { key: 'ACTIVE', label: 'Đang làm' },
+      { key: 'JOINED_PERIOD', label: 'Nhận việc' },
+      { key: 'LAST_WORK_PERIOD', label: 'Ngày làm cuối' },
+      { key: 'EXITED', label: 'Đã nghỉ' },
+      { key: 'UNKNOWN', label: 'Chưa xác định' }
+    ];
+
+    pillDefs.forEach(function (pd) {
+      var btn = el('button', pd.label, 'flmp-roster-pill' + (rosterFilter === pd.key ? ' is-active' : ''));
+      btn.onclick = function () {
+        rosterFilter = pd.key;
+        rosterPage = 1;
+        pillsContainer.querySelectorAll('.flmp-roster-pill').forEach(function (p, i) {
+          p.classList.toggle('is-active', pillDefs[i].key === rosterFilter);
+        });
+        renderRosterList();
+      };
+      pillsContainer.append(btn);
+    });
+
+    var rSearchBox = el('div', null, 'flmp-roster-search');
+    rSearchBox.innerHTML = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.35-4.35"/></svg>';
+    var rSearchInput = el('input');
+    rSearchInput.type = 'text';
+    rSearchInput.placeholder = 'Tìm Mã NV hoặc Họ tên…';
+    rSearchInput.oninput = function () {
+      rosterSearch = rSearchInput.value.trim().toLowerCase();
+      rosterPage = 1;
+      renderRosterList();
+    };
+    rSearchBox.append(rSearchInput);
+
+    var exportBtn = el('button', null, 'flmp-roster-export');
+    exportBtn.innerHTML = '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg> Xuất CSV';
+    exportBtn.onclick = function () {
+      exportRosterCsv(rosterRows, hubRow.station, isRider ? 'Rider' : 'Staff');
+    };
+
+    rosterControls.append(pillsContainer, rSearchBox, exportBtn);
+    viewRoster.append(rosterControls);
+
+    var rosterTableWrap = el('div', null, 'flmp-roster-table-wrap');
+    viewRoster.append(rosterTableWrap);
+
+    var rosterPagination = el('div', null, 'flmp-pagination');
+    viewRoster.append(rosterPagination);
+
+    body.append(viewRoster);
+    modal.append(body);
+
+    function renderRosterList() {
+      var filtered = rosterRows.filter(function (r) {
+        if (rosterFilter === 'ACTIVE' && r.status !== 'ACTIVE') return false;
+        if (rosterFilter === 'JOINED_PERIOD' && !r.is_joined_period) return false;
+        if (rosterFilter === 'LAST_WORK_PERIOD' && !r.is_last_work_period) return false;
+        if (rosterFilter === 'EXITED' && r.status !== 'EXITED') return false;
+        if (rosterFilter === 'UNKNOWN' && r.status !== 'UNKNOWN') return false;
+        if (rosterSearch &&
+            String(r.employee_id || '').toLowerCase().indexOf(rosterSearch) === -1 &&
+            String(r.employee_name || '').toLowerCase().indexOf(rosterSearch) === -1) {
+          return false;
+        }
+        return true;
+      });
+
+      var totalPages = Math.max(1, Math.ceil(filtered.length / pageSize));
+      if (rosterPage > totalPages) rosterPage = totalPages;
+      var startIdx = (rosterPage - 1) * pageSize;
+      var pageItems = filtered.slice(startIdx, startIdx + pageSize);
+
+      rosterTableWrap.replaceChildren();
+      var table = el('table', null, 'flmp-roster-table');
+      table.innerHTML = '<thead><tr>' +
+        '<th style="width:40px;">STT</th>' +
+        '<th>Mã nhân viên</th>' +
+        '<th>Họ và tên</th>' +
+        '<th>Vị trí</th>' +
+        '<th>Ngày nhận việc</th>' +
+        '<th>Ngày làm cuối</th>' +
+        '<th>Trạng thái</th>' +
+        '</tr></thead>';
+
+      var tb = el('tbody');
+      if (!pageItems.length) {
+        var trEmpty = el('tr');
+        var tdEmpty = el('td', 'Không có hồ sơ nào phù hợp bộ lọc');
+        tdEmpty.colSpan = 7;
+        tdEmpty.style.textAlign = 'center';
+        tdEmpty.style.padding = '24px';
+        tdEmpty.style.color = '#64748b';
+        trEmpty.append(tdEmpty);
+        tb.append(trEmpty);
+      } else {
+        pageItems.forEach(function (r, i) {
+          var tr = el('tr');
+          var badgeCls = 'badge-active';
+          var badgeText = 'Đang làm việc';
+
+          if (r.is_joined_period) {
+            badgeCls = 'badge-joined';
+            badgeText = 'Nhận việc mới';
+          } else if (r.is_last_work_period) {
+            badgeCls = 'badge-lastwork';
+            badgeText = 'Ngày làm cuối';
+          } else if (r.status === 'EXITED') {
+            badgeCls = 'badge-exited';
+            badgeText = 'Đã nghỉ trước kỳ';
+          } else if (r.status === 'UNKNOWN') {
+            badgeCls = 'badge-unknown';
+            badgeText = 'Chưa xác định';
+          }
+
+          tr.innerHTML = '<td>' + (startIdx + i + 1) + '</td>' +
+            '<td style="font-weight:600;font-family:monospace;color:#0b2343;">' + elEscape(r.employee_id) + '</td>' +
+            '<td style="font-weight:600;color:#1e293b;">' + elEscape(r.employee_name || 'Chưa cập nhật') + '</td>' +
+            '<td>' + elEscape(r.position) + '</td>' +
+            '<td>' + (r.join_date || '-') + '</td>' +
+            '<td>' + (r.last_work_date || '-') + '</td>' +
+            '<td><span class="flmp-roster-badge ' + badgeCls + '">' + badgeText + '</span></td>';
+          tb.append(tr);
+        });
+      }
+      table.append(tb);
+      rosterTableWrap.append(table);
+
+      // Pagination Controls
+      rosterPagination.replaceChildren();
+      var countInfo = el('span', 'Hiển thị ' + (filtered.length ? (startIdx + 1) : 0) + '–' + Math.min(startIdx + pageSize, filtered.length) + ' trên ' + filtered.length + ' nhân sự');
+      var btnGroup = el('div', null, 'flmp-page-btn-group');
+      var prevBtn = el('button', '← Trước', 'flmp-page-btn');
+      prevBtn.disabled = rosterPage <= 1;
+      prevBtn.onclick = function () {
+        if (rosterPage > 1) {
+          rosterPage--;
+          renderRosterList();
+        }
+      };
+
+      var pageLabel = el('span', ' ' + rosterPage + ' / ' + totalPages + ' ', null);
+      pageLabel.style.margin = '0 8px';
+
+      var nextBtn = el('button', 'Sau →', 'flmp-page-btn');
+      nextBtn.disabled = rosterPage >= totalPages;
+      nextBtn.onclick = function () {
+        if (rosterPage < totalPages) {
+          rosterPage++;
+          renderRosterList();
+        }
+      };
+
+      btnGroup.append(prevBtn, pageLabel, nextBtn);
+      rosterPagination.append(countInfo, btnGroup);
+    }
+
+    function fetchHubRoster() {
+      if (rosterLoaded) return;
+      rosterTableWrap.replaceChildren();
+      var loadDiv = el('div', null, 'flmp-loading');
+      loadDiv.innerHTML = '<div class="flmp-spinner"></div><p>Đang tải danh sách nhân sự tại ' + elEscape(hubRow.station) + '…</p>';
+      rosterTableWrap.append(loadDiv);
+
+      google.script.run
+        .withSuccessHandler(function (res) {
+          rosterLoaded = true;
+          rosterRows = (res && res.rows) || [];
+          renderRosterList();
+        })
+        .withFailureHandler(function (err) {
+          rosterTableWrap.replaceChildren();
+          var errDiv = el('div', null, 'flmp-warning');
+          errDiv.textContent = 'Không tải được danh sách nhân sự: ' + String(err.message || err);
+          rosterTableWrap.append(errDiv);
+        })
+        .flmPeopleGetHubRoster({
+          module: p.module,
+          station: hubRow.station,
+          anchorDate: p.anchor,
+          scopeType: p.scope ? p.scope.type : 'CITY',
+          scopeValue: p.scope ? p.scope.value : 'HCM_CITY'
+        });
+    }
+
+    tabOverview.onclick = function () {
+      tabOverview.classList.add('is-active');
+      tabRoster.classList.remove('is-active');
+      viewOverview.style.display = 'block';
+      viewRoster.style.display = 'none';
+    };
+
+    tabRoster.onclick = function () {
+      tabRoster.classList.add('is-active');
+      tabOverview.classList.remove('is-active');
+      viewOverview.style.display = 'none';
+      viewRoster.style.display = 'block';
+      fetchHubRoster();
+    };
+
+    var foot = el('div', null, 'flmp-modal-foot');
+    var filterBtn = el('button', 'Lọc bảng theo Hub này', 'flmp-btn flmp-btn-primary');
+    filterBtn.onclick = function () {
+      tableState.search = hubRow.station;
+      closeHubModal();
+      var input = root.querySelector('.flmp-search-box input');
+      if (input) {
+        input.value = hubRow.station;
+        input.dispatchEvent(new Event('input'));
+      }
+    };
+    var cancelBtn = el('button', 'Đóng', 'flmp-btn flmp-btn-secondary');
+    cancelBtn.onclick = closeHubModal;
+    foot.append(filterBtn, cancelBtn);
+    modal.append(foot);
+
+    overlay.append(modal);
+    document.body.append(overlay);
+  }
+
+  function closeHubModal() {
+    var old = document.getElementById('flmpHubModal');
+    if (old) old.remove();
+  }
+
+  function render(root, p) {
+    root.replaceChildren();
+    root.classList.add('flmp');
+
+    var isRider = p.module === 'RIDER';
+    var activeTotal = Number(p.totals.active || 0);
+    var joinedTotal = Number(p.totals.joined_period || 0);
+    var lastWorkTotal = Number(p.totals.last_work_day_period || 0);
+    var unknownTotal = Number(p.totals.unknown_records || 0);
+    var exitedTotal = Number(p.totals.exited_before_anchor || 0);
+    var netFlow = joinedTotal - lastWorkTotal;
+
+    // Header summary
+    var head = el('div', null, 'flmp-head');
+    head.append(
+      el('h2', isRider ? 'Rider Resource Overview' : 'FTE Resource — Staff Overview', 'flmp-title'),
+      el('p', 'Cuối ngày ' + p.anchor + ' · Kỳ theo dõi ' + p.from + ' → ' + p.anchor + ' · ' + (p.hubRows ? p.hubRows.length : 0) + ' Hubs', 'flmp-subtitle')
+    );
+    root.append(head);
+
+    // Metric Cards
+    var cards = el('div', null, 'flmp-cards');
+    var cardDefs = [
+      {
+        key: 'active',
+        label: 'Đang làm cuối ngày',
+        cls: 'flmp-card-active',
+        val: activeTotal,
+        sub: 'join_date ≤ ' + p.anchor + ' & chưa nghỉ việc',
+        icon: '<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M22 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg>'
+      },
+      {
+        key: 'joined_period',
+        label: 'Nhận việc trong kỳ',
+        cls: 'flmp-card-joined',
+        val: joinedTotal,
+        sub: 'Gia nhập trong 30 ngày vừa qua',
+        icon: '<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><path d="M12 8v8M8 12h8"/></svg>'
+      },
+      {
+        key: 'last_work_day_period',
+        label: 'Ngày làm cuối trong kỳ',
+        cls: 'flmp-card-last',
+        val: lastWorkTotal,
+        sub: 'Nghỉ việc/rời trạm trong 30 ngày',
+        icon: '<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/><polyline points="16 17 21 12 16 7"/><line x1="21" y1="12" x2="9" y2="12"/></svg>'
+      },
+      {
+        key: 'unknown_records',
+        label: 'Chưa xác định',
+        cls: 'flmp-card-unknown',
+        val: unknownTotal,
+        sub: 'Hồ sơ thiếu ngày nhận việc/ngày nghỉ',
+        icon: '<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></svg>'
+      }
+    ];
+
+    cardDefs.forEach(function (def) {
+      var card = el('div', null, 'flmp-card ' + def.cls);
+      card.append(el('div', null, 'flmp-card-bar'));
+      var top = el('div', null, 'flmp-card-top');
+      top.append(el('span', def.label, 'flmp-card-label'));
+      var icon = el('div', null, 'flmp-card-icon');
+      icon.innerHTML = def.icon;
+      top.append(icon);
+      card.append(top);
+      card.append(el('strong', formatNum(def.val), 'flmp-card-value'));
+      card.append(el('span', def.sub, 'flmp-card-sub'));
+      cards.append(card);
+    });
+    root.append(cards);
+
+    // Flow & Summary Bar
+    var flowBar = el('div', null, 'flmp-flow-bar');
+    var netPillCls = netFlow > 0 ? 'is-pos' : (netFlow < 0 ? 'is-neg' : 'is-neu');
+    var netSign = netFlow > 0 ? '+' : '';
+    flowBar.innerHTML = '<div class="flmp-flow-item"><span>Biến động nhân sự ròng (30 ngày):</span>' +
+      '<span class="flmp-flow-pill ' + netPillCls + '">' + netSign + formatNum(netFlow) + ' ' + (isRider ? 'Rider' : 'Staff') + '</span></div>' +
+      '<div class="flmp-flow-item"><span>Tỷ lệ biến động (Turnover rate):</span>' +
+      '<span class="flmp-flow-pill is-neu">' + (activeTotal > 0 ? ((lastWorkTotal / activeTotal) * 100).toFixed(1) : 0) + '%</span></div>' +
+      '<div class="flmp-flow-item" style="color:#64748b;font-size:12px;">' +
+      '<span>Quy tắc: ' + (p.dateRule || 'Ngày làm cuối vẫn tính đang làm; hôm sau tính đã nghỉ.') + '</span></div>';
+    root.append(flowBar);
+
+    // Collapsible Warnings / Source Note
+    if (p.warnings && p.warnings.length) {
+      var details = el('details', null, 'flmp-notice-accordion');
+      var summary = el('summary', null, 'flmp-notice-summary');
+      summary.innerHTML = '<span><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="vertical-align:-2px;margin-right:6px;"><path d="m21.73 18-8-14a2 2 0 0 0-3.48 0l-8 14A2 2 0 0 0 4 21h16a2 2 0 0 0 1.73-3Z"/><line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg>' +
+        'Ghi chú nguồn dữ liệu & lưu ý quy tắc (' + p.warnings.length + ')</span><small>Bấm để xem</small>';
+      details.append(summary);
+      var bodyNotices = el('div', null, 'flmp-notice-body');
+      var ul = el('ul');
+      p.warnings.forEach(function (w) {
+        ul.append(el('li', w));
+      });
+      bodyNotices.append(ul);
+      details.append(bodyNotices);
+      root.append(details);
+    }
+
+    var rows = p.hubRows || [];
+    if (!rows.length) {
+      var emptyBox = el('div', null, 'flmp-empty');
+      emptyBox.append(
+        el('b', 'Không có dữ liệu khớp scope/ngày đã chọn'),
+        el('p', 'Kiểm tra phân quyền Hub hoặc nguồn dữ liệu đã được nạp.')
+      );
+      root.append(emptyBox);
+      return;
+    }
+
+    // Interactive Analytics Section (Top Hubs Bar Chart + Workforce Composition)
+    var analytics = el('div', null, 'flmp-analytics');
+
+    // Chart Box 1: Top Hubs Comparison
+    var chartBox = el('div', null, 'flmp-chart-box');
+    var chartHead = el('div', null, 'flmp-chart-head');
+    chartHead.append(el('h4', 'Phân tích Top Hub theo số lượng', 'flmp-chart-title'));
+
+    var tabs = el('div', null, 'flmp-chart-tabs');
+    var tabConfigs = [
+      { key: 'active', label: 'Đang làm' },
+      { key: 'joined_period', label: 'Nhận việc' },
+      { key: 'last_work_day_period', label: 'Ngày làm cuối' },
+      { key: 'net_change', label: 'Tăng trưởng ròng' }
+    ];
+    tabConfigs.forEach(function (tc) {
+      var btn = el('button', tc.label, 'flmp-chart-tab' + (tableState.chartMetric === tc.key ? ' is-active' : ''));
+      btn.onclick = function () {
+        tableState.chartMetric = tc.key;
+        renderAnalyticsBars();
+      };
+      tabs.append(btn);
+    });
+    chartHead.append(tabs);
+    chartBox.append(chartHead);
+
+    var barsContainer = el('div', null, 'flmp-bars-container');
+    chartBox.append(barsContainer);
+    analytics.append(chartBox);
+
+    function renderAnalyticsBars() {
+      tabs.querySelectorAll('.flmp-chart-tab').forEach(function (t, i) {
+        t.classList.toggle('is-active', tabConfigs[i].key === tableState.chartMetric);
+      });
+      barsContainer.replaceChildren();
+
+      var metric = tableState.chartMetric;
+      var sortedRows = rows.slice().map(function (r) {
+        var v = metric === 'net_change' ? (Number(r.joined_period || 0) - Number(r.last_work_day_period || 0)) : Number(r[metric] || 0);
+        return { row: r, val: v, station: r.station };
+      }).sort(function (a, b) {
+        if (metric === 'net_change') return b.val - a.val;
+        if (b.val !== a.val) return b.val - a.val;
+        return a.station.localeCompare(b.station);
+      }).slice(0, tableState.chartLimit || 12);
+
+      var maxVal = Math.max.apply(null, [1].concat(sortedRows.map(function (x) { return Math.abs(x.val); })));
+
+      sortedRows.forEach(function (item) {
+        var row = el('div', null, 'flmp-bar-row');
+        row.title = 'Bấm để xem chi tiết Hub ' + item.station;
+        row.onclick = function () {
+          openHubModal(root, item.row, p);
+        };
+
+        var name = el('span', item.station, 'flmp-bar-name');
+        var track = el('div', null, 'flmp-bar-track');
+        var fill = el('div', null, 'flmp-bar-fill');
+        var pct = Math.max(3, Math.min(100, Math.round((Math.abs(item.val) / maxVal) * 100)));
+        fill.style.width = pct + '%';
+
+        if (metric === 'net_change') {
+          fill.style.background = item.val >= 0 ? '#00875a' : '#de350b';
+        } else if (metric === 'joined_period') {
+          fill.style.background = '#00875a';
+        } else if (metric === 'last_work_day_period') {
+          fill.style.background = '#ff8b00';
+        } else {
+          fill.style.background = '#0052cc';
+        }
+
+        track.append(fill);
+        var valSign = metric === 'net_change' && item.val > 0 ? '+' : '';
+        var val = el('span', valSign + formatNum(item.val), 'flmp-bar-val');
+        if (metric === 'net_change') {
+          val.style.color = item.val >= 0 ? '#00875a' : '#de350b';
+        }
+
+        row.append(name, track, val);
+        barsContainer.append(row);
+      });
+    }
+
+    // Chart Box 2: Workforce Composition
+    var compBox = el('div', null, 'flmp-chart-box');
+    compBox.innerHTML = '<div class="flmp-chart-head"><h4 class="flmp-chart-title">Cơ cấu trạng thái nhân sự</h4></div>';
+
+    var totalRecords = activeTotal + exitedTotal + unknownTotal;
+    var activePct = totalRecords > 0 ? Math.round((activeTotal / totalRecords) * 100) : 0;
+    var exitedPct = totalRecords > 0 ? Math.round((exitedTotal / totalRecords) * 100) : 0;
+    var unknownPct = totalRecords > 0 ? Math.round((unknownTotal / totalRecords) * 100) : 0;
+
+    var compBars = el('div', null, 'flmp-comp-bars');
+    compBars.innerHTML = '<div class="flmp-comp-stack">' +
+      '<div class="flmp-comp-slice" style="width:' + activePct + '%;background:#0052cc;" title="Đang làm: ' + activePct + '%"></div>' +
+      '<div class="flmp-comp-slice" style="width:' + exitedPct + '%;background:#ff8b00;" title="Đã nghỉ trước kỳ: ' + exitedPct + '%"></div>' +
+      '<div class="flmp-comp-slice" style="width:' + unknownPct + '%;background:#6554c0;" title="Chưa xác định: ' + unknownPct + '%"></div>' +
+      '</div>';
+
+    var compLegend = el('div', null, 'flmp-comp-legend');
+    compLegend.innerHTML = '<div class="flmp-comp-item"><span><i class="flmp-comp-dot" style="background:#0052cc;"></i>Đang làm việc:</span>' +
+      '<b>' + formatNum(activeTotal) + ' (' + activePct + '%)</b></div>' +
+      '<div class="flmp-comp-item"><span><i class="flmp-comp-dot" style="background:#ff8b00;"></i>Đã nghỉ trước kỳ:</span>' +
+      '<b>' + formatNum(exitedTotal) + ' (' + exitedPct + '%)</b></div>' +
+      '<div class="flmp-comp-item"><span><i class="flmp-comp-dot" style="background:#6554c0;"></i>Chưa xác định:</span>' +
+      '<b>' + formatNum(unknownTotal) + ' (' + unknownPct + '%)</b></div>' +
+      '<div style="margin-top:14px;padding-top:10px;border-top:1px dashed #e2e8f0;" class="flmp-comp-item">' +
+      '<span>Tổng hồ sơ ghi nhận:</span><strong>' + formatNum(totalRecords) + '</strong></div>';
+
+    compBox.append(compBars, compLegend);
+    analytics.append(compBox);
+
+    root.append(analytics);
+    renderAnalyticsBars();
+
+    // Toolbar (Search + Hub count)
+    var toolbar = el('div', null, 'flmp-toolbar');
+    var searchBox = el('div', null, 'flmp-search-box');
+    searchBox.innerHTML = '<svg class="flmp-search-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.35-4.35"/></svg>';
+    var searchInput = el('input');
+    searchInput.type = 'text';
+    searchInput.placeholder = 'Tìm nhanh Hub (bấm vào dòng để xem chi tiết)…';
+    searchInput.value = tableState.search || '';
+    searchBox.append(searchInput);
+
+    var countBadge = el('span', 'Hiển thị ' + rows.length + ' Hubs (Bấm dòng để xem chi tiết)', 'flmp-count-badge');
+    toolbar.append(searchBox, countBadge);
+    root.append(toolbar);
+
+    // Table container
+    var tableWrap = el('div', null, 'flmp-scroll');
+    root.append(tableWrap);
+
+    function updateTable() {
+      var q = (tableState.search || '').trim().toLowerCase();
+      var filtered = rows.filter(function (r) {
+        if (!q) return true;
+        return String(r.station || '').toLowerCase().indexOf(q) !== -1;
+      });
+
+      countBadge.textContent = 'Hiển thị ' + filtered.length + ' / ' + rows.length + ' Hubs (Bấm dòng để xem chi tiết)';
+
+      var col = tableState.sortCol || 'active';
+      var asc = tableState.sortAsc === true;
+      filtered.sort(function (a, b) {
+        if (col === 'station') {
+          return asc ? String(a.station).localeCompare(String(b.station)) : String(b.station).localeCompare(String(a.station));
+        }
+        var va = Number(a[col] || 0), vb = Number(b[col] || 0);
+        return asc ? va - vb : vb - va;
+      });
+
+      tableWrap.replaceChildren();
+      var table = el('table');
+      var head = el('thead');
+      var htr = el('tr');
+      var cols = [
+        ['station', 'Hub'],
+        ['active', 'Đang làm'],
+        ['joined_period', 'Nhận việc'],
+        ['last_work_day_period', 'Ngày làm cuối'],
+        ['exited_before_anchor', 'Đã nghỉ trước kỳ'],
+        ['unknown_records', 'Chưa xác định'],
+        ['action', 'Thao tác']
+      ];
+
+      cols.forEach(function (c) {
+        var th = el('th', c[1]);
+        if (c[0] !== 'action' && tableState.sortCol === c[0]) {
+          th.classList.add('is-sorted');
+          var arrow = el('span', tableState.sortAsc ? ' ▲' : ' ▼', 'sort-arrow');
+          th.append(arrow);
+        }
+        if (c[0] !== 'action') {
+          th.onclick = function () {
+            if (tableState.sortCol === c[0]) {
+              tableState.sortAsc = !tableState.sortAsc;
+            } else {
+              tableState.sortCol = c[0];
+              tableState.sortAsc = c[0] === 'station';
+            }
+            updateTable();
+          };
+        }
+        htr.append(th);
+      });
+      head.append(htr);
+      table.append(head);
+
+      var body = el('tbody');
+      if (!filtered.length) {
+        var emptyTr = el('tr');
+        var emptyTd = el('td', 'Không tìm thấy Hub nào phù hợp với từ khóa "' + q + '"');
+        emptyTd.colSpan = cols.length;
+        emptyTd.style.textAlign = 'center';
+        emptyTd.style.padding = '30px';
+        emptyTr.append(emptyTd);
+        body.append(emptyTr);
+      } else {
+        filtered.forEach(function (r) {
+          var tr = el('tr', null, 'flmp-row');
+          tr.title = 'Bấm để xem phân tích & danh sách nhân sự Hub ' + r.station;
+          tr.onclick = function () {
+            openHubModal(root, r, p);
+          };
+
+          cols.forEach(function (c) {
+            if (c[0] === 'action') {
+              var td = el('td');
+              var btn = el('button', 'Xem chi tiết', 'flmp-action-btn');
+              btn.onclick = function (ev) {
+                ev.stopPropagation();
+                openHubModal(root, r, p);
+              };
+              td.append(btn);
+              tr.append(td);
+            } else {
+              tr.append(el('td', c[0] === 'station' ? r[c[0]] : formatNum(r[c[0]])));
+            }
+          });
+          body.append(tr);
+        });
+      }
+      table.append(body);
+
+      // Footer total row
+      var foot = el('tfoot');
+      var ftr = el('tr');
+      cols.forEach(function (c) {
+        if (c[0] === 'station') {
+          ftr.append(el('td', 'Tổng (' + filtered.length + ' Hubs)'));
+        } else if (c[0] === 'action') {
+          ftr.append(el('td', ''));
+        } else {
+          var sum = filtered.reduce(function (acc, r) { return acc + Number(r[c[0]] || 0); }, 0);
+          ftr.append(el('td', formatNum(sum)));
+        }
+      });
+      foot.append(ftr);
+      table.append(foot);
+
+      tableWrap.append(table);
+    }
+
+    searchInput.oninput = function () {
+      tableState.search = searchInput.value;
+      updateTable();
+    };
+
+    updateTable();
+  }
+
+  function load(root, module, request, onDone, onError) {
+    if (!(root instanceof Element)) throw Error('Missing host container');
+    var seq = (versions.get(root) || 0) + 1;
+    versions.set(root, seq);
+
+    root.replaceChildren();
+    root.classList.add('flmp');
+    var loadingBox = el('div', null, 'flmp-loading');
+    loadingBox.append(
+      el('div', null, 'flmp-spinner'),
+      el('p', 'Đang tải dữ liệu phân tích nhân sự ' + (module === 'RIDER' ? 'Rider' : 'FTE') + '…')
+    );
+    root.append(loadingBox);
+
+    var timer = setTimeout(function () {
+      if (versions.get(root) === seq) {
+        versions.set(root, seq + 1);
+        root.replaceChildren(el('div', 'Truy vấn chưa hoàn tất. Vui lòng bấm "Làm mới dữ liệu" để thử lại.', 'flmp-warning'));
+      }
+    }, 40000);
+
+    google.script.run
+      .withSuccessHandler(function (p) {
+        clearTimeout(timer);
+        if (versions.get(root) !== seq || !root.isConnected) return;
+        render(root, p);
+        if (typeof onDone === 'function') onDone(p);
+      })
+      .withFailureHandler(function (e) {
+        clearTimeout(timer);
+        if (versions.get(root) !== seq || !root.isConnected) return;
+        var errBox = el('div', null, 'flmp-warning');
+        errBox.textContent = 'Không tải được: ' + String(e.message || e);
+        root.replaceChildren(errBox);
+        if (typeof onError === 'function') onError(e);
+      })
+      .flmPeopleGetResource(Object.assign({}, request, { module: module }));
+  }
+
+  // Keyboard shortcut: Esc to close modal
+  window.addEventListener('keydown', function (e) {
+    if (e.key === 'Escape') closeHubModal();
+  });
+
+  return {
+    render: render,
+    load: load,
+    openHubDetail: openHubModal,
+    cancel: function (root) {
+      if (root instanceof Element) versions.set(root, (versions.get(root) || 0) + 1);
+      closeHubModal();
+    }
+  };
+})();
+</script>

@@ -1,0 +1,7 @@
+dist/
+.clasp.json
+local/fixtures.private.json
+local/*.private.json
+*.xlsx
+local/*.log
+local/morphicons-build/node_modules/

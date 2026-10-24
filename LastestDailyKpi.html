@@ -1,0 +1,42 @@
+// Optional latest-day API. Replace the entire Apps Script file with this content.
+// Shared KPI_DAILY_DIRECT_CFG is declared only in DailyKpiDirect.gs.
+// Do not paste DailyKpiDirect.gs here or append this file to an older copy.
+function getLatestDailyKpiSnapshot(hubCodes,forceRefresh,dateKey){
+  const access=requireAccess_(['dashboard', 'kpi']);if(access.rank==='NORMAL')throw Error('ACCESS_DENIED');
+  const permission=getPermissionModel_(false),authorized=fullAuthorizedHubCodes_(access,permission);
+  const allowed=new Set(authorized.map(normalizeCompare_));
+  const requested=Array.isArray(hubCodes)&&hubCodes.length?hubCodes:authorized;
+  if(requested.some(code=>!allowed.has(normalizeCompare_(code))))throw Error('HUB_ACCESS_DENIED');
+  const model=getKpiDailyDirectModel_(allowHeavyForceRefresh_(access,'latest-daily-kpi',forceRefresh===true));
+  return latestDailyKpiView_(model,requested,Utilities.formatDate(new Date(),'Asia/Ho_Chi_Minh','yyyy-MM-dd'),dateKey);
+}
+function latestDailyKpiView_(model,hubCodes,today,dateKey){
+  const wanted=new Set(hubCodes.map(normalizeCompare_));
+  const usable=(model.rows||[]).filter(r=>wanted.has(normalizeCompare_(r[2]))&&r[1]<=today&&r.slice(8,14).some(v=>typeof v==='number'&&isFinite(v)));
+  const dates=Array.from(new Set(usable.map(r=>r[1]))).sort(),date=dateKey&&dates.includes(dateKey)?dateKey:dates[dates.length-1]||'',previousDate=dates.filter(d=>d<date).pop()||'';
+  function rowsFor(day){const byHub={};usable.filter(r=>r[1]===day).forEach(r=>{byHub[normalizeCompare_(r[2])]={dateKey:r[1],hubCode:r[2],stationName:r[3],hubType:r[4]||'',fmOntime:r[8],lmOntime:r[9],deliSuccess:r[10],sorterProductivity:r[11],riderProductivity:r[12],correctSopPu:r[13]}});return Object.keys(byHub).map(k=>byHub[k])}
+  return {ok:true,dateKey:date,rows:rowsFor(date),previousDate:previousDate,previousRows:rowsFor(previousDate),availableDates:dates.slice().reverse(),source:'KPI Daily',generatedAt:model.generatedAt||'',selectedHubCount:hubCodes.length};
+}
+
+// KPI Result contains monthly values; KPI Daily provides the last numeric day per metric.
+function getKpiMetricFreshness(hubCodes,month,forceRefresh){
+  const access=requireAccess_(['dashboard', 'kpi']);if(access.rank==='NORMAL')throw Error('ACCESS_DENIED');
+  if(!/^\d{4}-(0[1-9]|1[0-2])$/.test(String(month||'')))throw Error('KPI_MONTH_INVALID');
+  const permission=getPermissionModel_(false),authorized=fullAuthorizedHubCodes_(access,permission),allowed=new Set(authorized.map(normalizeCompare_));
+  const requested=Array.isArray(hubCodes)&&hubCodes.length?hubCodes:authorized;
+  if(requested.some(code=>!allowed.has(normalizeCompare_(code))))throw Error('HUB_ACCESS_DENIED');
+  const force=allowHeavyForceRefresh_(access,'kpi-metric-freshness',forceRefresh===true),daily=getKpiDailyDirectModel_(force),cutoffs={};
+  const matcher=buildPermissionStationAliasIndex_(permission,Object.fromEntries(requested.map(code=>[normalizeCompare_(code),true])));
+  (getKpiModel_(false).rows||[]).filter(r=>r.monthKey===month).forEach(r=>{const station=matcher.resolve(r.stationName),asOf=sourceDateKey_((r.reporting||{})['As Of']);if(station&&asOf)cutoffs[normalizeCompare_(station.hubCode)]=asOf});
+  return kpiMetricFreshnessView_(daily,requested,month,Utilities.formatDate(new Date(),'Asia/Ho_Chi_Minh','yyyy-MM-dd'),cutoffs);
+}
+function kpiMetricFreshnessView_(model,hubCodes,month,today,cutoffs){
+  const keys=['fmOntime','lmOntime','deliSuccess','sorterProductivity','riderProductivity','correctSopPu'],wanted=new Set(hubCodes.map(normalizeCompare_)),latest={};
+  keys.forEach(key=>latest[key]={});
+  (model.rows||[]).forEach(r=>{
+    const code=normalizeCompare_(r[2]);if(!wanted.has(code)||r[1].slice(0,7)!==month||r[1]>today||cutoffs&&cutoffs[code]&&r[1]>cutoffs[code])return;
+    keys.forEach((key,i)=>{const value=r[8+i];if(typeof value==='number'&&isFinite(value)&&(!latest[key][code]||latest[key][code]<r[1]))latest[key][code]=r[1]});
+  });
+  const metrics={};keys.forEach(key=>{const dates=Object.values(latest[key]).sort(),date=dates[dates.length-1]||'';metrics[key]={date:date,earliestHubDate:dates[0]||'',reportingHubs:dates.length,hubsAtLatest:dates.filter(d=>d===date).length}});
+  return {month:month,metrics:metrics,source:'KPI Daily',scopeHubs:hubCodes.length};
+}

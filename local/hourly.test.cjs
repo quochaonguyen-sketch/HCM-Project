@@ -1,0 +1,67 @@
+const assert=require('node:assert/strict');
+const fs=require('node:fs');
+const vm=require('node:vm');
+const path=require('node:path');
+const {createRuntime}=require('./apps-script-runtime.cjs');
+const r=createRuntime();
+const key='lm_hub_received_in_system_order_qty_1h';
+const raw=JSON.parse(fs.readFileSync(path.join(__dirname,'hourly.private.json'),'utf8'));
+const headers=raw[0],source=raw.slice(1).map(row=>Object.fromEntries(headers.map((k,i)=>[k,row[i]])));
+const result=r.call('getD0Snapshot',[false,'hourly']);
+const rows=result.sheets['Throughput Hourly D0'];
+assert.equal(r.call('getD0HourlySnapshot',[false]).apiVersion,'d0-hourly-v2');
+// Reproduce production's old registry: the dedicated hourly API must bypass it.
+const registry=r.context.d0SectionSheets_,summary=r.context.d0SummarySnapshot_,sectionFilter=r.context.d0SnapshotSection_;
+r.context.d0SectionSheets_=section=>{if(section==='hourly')throw Error('INVALID_D0_SECTION');return registry(section)};
+r.context.d0SummarySnapshot_=()=>{throw Error('Legacy summary must not process hourly data')};
+r.context.d0SnapshotSection_=()=>{throw Error('Legacy section filter must not process hourly data')};
+assert.equal(r.call('getD0HourlySnapshot',[false]).sheets['Throughput Hourly D0'].length,830);
+assert.equal(r.call('getD0Snapshot',[false,'hourly']).sheets['Throughput Hourly D0'].length,830);
+// Both shipped copies of the Web API must work regardless of Apps Script order.
+for(const file of ['Code.gs','WorkspaceApi.gs']){
+ const code=fs.readFileSync(path.join(__dirname,'..',file),'utf8');
+ const api=file==='Code.gs'?code.slice(code.indexOf('function deployHubCatalog_(access, permission) {')):code;
+ vm.runInContext(api,r.context,{filename:file});
+ assert.equal(r.call('getD0HourlySnapshot',[false]).sheets['Throughput Hourly D0'].length,830);
+ assert.equal(r.call('getD0Snapshot',[false,'hourly']).sheets['Throughput Hourly D0'].length,830);
+}
+r.context.d0SectionSheets_=registry;r.context.d0SummarySnapshot_=summary;r.context.d0SnapshotSection_=sectionFilter;
+assert.equal(new Set(rows.map(x=>x.hub_code)).size,100);
+assert.equal(rows.length,830);
+assert.equal(rows.reduce((sum,x)=>sum+x[key],0),source.reduce((sum,x)=>sum+Number(x[key]),0));
+assert(rows.every(x=>Number.isInteger(x.hour)&&x.hour>=0&&x.hour<24));
+assert(rows.some(x=>x[key]===0));
+assert(rows.every(x=>x.hour<=12));
+const transform=r.context.d0HourlyRows_;
+const base={hub_code:'A',station_id:1,grass_date:'2026-10-19',hour:'0:00',fetched_at:'2026-10-19 12:00:00'};
+assert.equal(transform([{...base,[key]:''}]).length,0);
+assert.equal(transform([{...base,[key]:0}])[0][key],0);
+assert.equal(transform([{...base,hour:0.5,[key]:'10'}])[0].hour,12);
+assert.equal(transform([{...base,hour:'23:00',[key]:'1,234'}])[0][key],1234);
+assert.equal(transform([{...base,hour:'24:00',[key]:10}]).length,0);
+assert.equal(transform([{...base,[key]:10},{...base,fetched_at:'2026-10-19 12:30:00',[key]:5}])[0][key],5);
+assert.equal(transform([{...base,[key]:10},{...base,grass_date:'2026-10-20',[key]:''}]).length,0);
+const permission=r.context.getPermissionModel_(false),sup=Object.values(permission.users).find(u=>u.rank==='SUP'&&u.hubCodes.some(c=>rows.some(x=>x.hub_code===c)));
+assert(sup);
+r.context.Session.getActiveUser=()=>({getEmail:()=>sup.email});
+const scoped=r.call('getD0Snapshot',[false,'hourly']).sheets['Throughput Hourly D0'];
+assert.equal(r.call('getD0HourlySnapshot',[false]).sheets['Throughput Hourly D0'].length,scoped.length);
+assert(scoped.length>0&&scoped.length<rows.length);
+assert(scoped.every(x=>sup.hubCodes.includes(x.hub_code)));
+r.context.Session.getActiveUser=()=>({getEmail:()=>'unknown@example.test'});
+assert.throws(()=>r.call('getD0Snapshot',[false,'hourly']));
+assert.throws(()=>r.call('getD0HourlySnapshot',[false]));
+// Client aggregation must not turn missing hours into zero or retain absent HUBs.
+const js=fs.readFileSync(path.join(__dirname,'..','Javascript.html'),'utf8');
+const snippet=js.slice(js.indexOf('function lmHourlyModel_(){'),js.indexOf('function lmHourlyChart_('));
+const ctx={D0:{data:{sheets:{'Throughput Hourly D0':rows}}},LmHourly:{metric:'received',hub:'missing'},Set,d0Num:v=>typeof v==='number'&&isFinite(v)?v:null,d0Scoped:()=>Array.from(new Set(rows.map(x=>x.hub_code))).map(code=>({code})),d0LatestUpdated:()=>''};
+vm.createContext(ctx);vm.runInContext(snippet,ctx);
+let model=ctx.lmHourlyModel_();
+assert.equal(model.hubs.length,100);assert.equal(ctx.LmHourly.hub,'');
+assert.equal(model.total,rows.reduce((sum,x)=>sum+x[key],0));
+assert.equal(model.hours[13].value,null);
+ctx.LmHourly.hub=model.hubs[0].code;
+model=ctx.lmHourlyModel_();assert.equal(model.count,1);
+assert.equal(model.total,rows.filter(x=>x.hub_code===ctx.LmHourly.hub).reduce((sum,x)=>sum+x[key],0));
+ctx.d0Scoped=()=>[];model=ctx.lmHourlyModel_();assert.equal(model.hubs.length,0);assert.equal(model.total,null);
+console.log('PASS: 100 observed HUBs / 830 rows; CSV totals; blank versus zero; hourly parsing; deduplication; latest date; scoped access; single-HUB and empty chart.');

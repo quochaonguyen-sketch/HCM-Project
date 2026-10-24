@@ -1,0 +1,11 @@
+{
+  "name": "hcm-ops-hub",
+  "private": true,
+  "scripts": {
+    "dev": "node local/server.cjs",
+    "check": "node local/check.cjs",
+    "test:local": "node local/runtime.test.cjs",
+    "build:production": "node local/export.cjs"
+  },
+  "engines": { "node": ">=18" }
+}

@@ -1,0 +1,9 @@
+{
+  "name": "hcm-morphicons-build",
+  "private": true,
+  "type": "module",
+  "devDependencies": {
+    "esbuild": "0.25.12",
+    "morphicons": "2.0.0"
+  }
+}

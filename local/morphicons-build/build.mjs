@@ -1,0 +1,16 @@
+import fs from 'node:fs';
+import path from 'node:path';
+import {fileURLToPath} from 'node:url';
+import {build} from 'esbuild';
+const here=path.dirname(fileURLToPath(import.meta.url));
+const root=path.resolve(here,'../..');
+const license=fs.readFileSync(path.join(here,'node_modules/morphicons/LICENSE'),'utf8');
+const result=await build({entryPoints:[path.join(here,'entry.mjs')],bundle:true,write:false,format:'iife',globalName:'SPXMorphicons',target:['es2020'],minify:true,legalComments:'inline'});
+const js=result.outputFiles[0].text.replace(/<\/script/gi,'<\\/script');
+const block='<!-- SPX MORPHICONS VENDOR START -->\n<script>\n/*! morphicons 2.0.0 — https://www.morphicons.com/\n'+license.replace(/\*\//g,'* /')+'\n*/\n'+js+'\n</script>\n<!-- SPX MORPHICONS VENDOR END -->\n';
+const file=path.join(root,'Javascript.html');
+let source=fs.readFileSync(file,'utf8');
+const pattern=/<!-- SPX MORPHICONS VENDOR START -->[\s\S]*?<!-- SPX MORPHICONS VENDOR END -->\r?\n?/;
+source=pattern.test(source)?source.replace(pattern,()=>block):block+source;
+fs.writeFileSync(file,source);
+console.log('Embedded morphicons 2.0.0: '+Buffer.byteLength(js)+' bytes. MIT license preserved.');

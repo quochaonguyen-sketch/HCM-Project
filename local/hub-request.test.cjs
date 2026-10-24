@@ -111,4 +111,57 @@ assert(req1 && req1.status === 'APPROVED', 'Request 1 status should be APPROVED'
 assert(req2 && req2.status === 'REJECTED', 'Request 2 status should be REJECTED');
 console.log('PASS: History records reflect APPROVED and REJECTED statuses');
 
-console.log('ALL HUB ACCESS REQUEST API TESTS PASSED!');
+// 9. Test AOM Direct Granting (aomGrantHubAccess)
+console.log('Testing AOM Direct Granting...');
+const directUserEmail = 'direct.rider@spxexpress.com';
+
+// 9a. Direct grant Hub 1 with role LEAD and KPI: true
+const grantRes1 = app.call('aomGrantHubAccess', [{
+  targetEmail: directUserEmail,
+  displayName: 'Direct User Rider',
+  hubCode: targetHub1.hubCode,
+  roleName: 'LEAD',
+  includeKpi: true,
+  note: 'AOM trực tiếp cấp quyền Lead có KPI'
+}]);
+assert(grantRes1.ok === true, 'Direct grant 1 failed');
+console.log('PASS: AOM direct grant 1 succeeded:', grantRes1.message);
+
+// 9b. Direct grant Hub 2 with DUPLICATE role LEAD and KPI: false
+const grantRes2 = app.call('aomGrantHubAccess', [{
+  targetEmail: directUserEmail,
+  displayName: 'Direct User Rider',
+  hubCode: targetHub2.hubCode,
+  roleName: 'LEAD',
+  includeKpi: false,
+  note: 'AOM trực tiếp cấp thêm Hub 2 với quyền LEAD không KPI'
+}]);
+assert(grantRes2.ok === true, 'Direct grant 2 failed');
+console.log('PASS: AOM direct grant 2 with duplicate role name succeeded:', grantRes2.message);
+
+// 9c. Verify in Access Grants and managedGrants
+const initDataAfterDirect = app.call('getHubRequestInitData', []);
+const userGrants = initDataAfterDirect.managedGrants.filter(g => g.email === directUserEmail);
+assert(userGrants.length === 2, 'User should have 2 active hub grants');
+const g1 = userGrants.find(g => g.hubCode === targetHub1.hubCode);
+const g2 = userGrants.find(g => g.hubCode === targetHub2.hubCode);
+assert(g1 && g1.roleName === 'LEAD' && g1.includeKpi === true, 'Grant 1 should be LEAD with KPI');
+assert(g2 && g2.roleName === 'LEAD' && g2.includeKpi === false, 'Grant 2 should be LEAD without KPI');
+console.log('PASS: Duplicate role name across hubs with different KPI settings verified in managedGrants!');
+
+// 10. Test AOM Revoke Access (aomRevokeHubAccess)
+console.log('Testing AOM Revoke Access...');
+const revokeRes = app.call('aomRevokeHubAccess', [{
+  targetEmail: directUserEmail,
+  hubCode: targetHub2.hubCode
+}]);
+assert(revokeRes.ok === true, 'Revoke Hub 2 failed');
+console.log('PASS: AOM revoke Hub 2 succeeded:', revokeRes.message);
+
+const initDataAfterRevoke = app.call('getHubRequestInitData', []);
+const userGrantsAfterRevoke = initDataAfterRevoke.managedGrants.filter(g => g.email === directUserEmail);
+assert(userGrantsAfterRevoke.length === 1, 'User should now only have 1 active hub grant');
+assert(userGrantsAfterRevoke[0].hubCode === targetHub1.hubCode, 'Remaining hub should be Hub 1');
+console.log('PASS: Hub 2 revoked while Hub 1 remains intact!');
+
+console.log('ALL HUB ACCESS REQUEST & AOM GRANT TESTS PASSED!');

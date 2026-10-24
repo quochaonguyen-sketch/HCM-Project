@@ -80,14 +80,16 @@ function readHubRequestRows_() {
 }
 
 /**
- * Endpoint: Initial data for Hub Permission Request page.
+ * Endpoint: Initial data for Hub Permission Request & AOM Grant page.
  */
 function getHubRequestInitData() {
   var access = requireAccess_();
   var permission = getPermissionModel_(false);
   var email = access.email;
   var isAdmin = access.isAdmin || access.rank === 'ADMIN';
-  var managedHubCodes = getAomManagedHubCodes_(email, permission);
+  var managedHubCodes = isAdmin
+    ? (permission.stations || []).map(function(s) { return String(s.hubCode); })
+    : getAomManagedHubCodes_(email, permission);
   var isAom = isAdmin || managedHubCodes.length > 0;
 
   var allStations = (permission.stations || []).map(function(s) {
@@ -102,17 +104,22 @@ function getHubRequestInitData() {
     return a.hubName.localeCompare(b.hubName);
   });
 
+  var managedHubSet = new Set(managedHubCodes.map(String));
+  var managedStations = allStations.filter(function(s) {
+    return managedHubSet.has(s.hubCode);
+  });
+
   var rows = readHubRequestRows_();
   var myRequests = rows.filter(function(r) { return r.email === email; })
                        .sort(function(a, b) { return String(b.createdAt).localeCompare(String(a.createdAt)); });
 
   var pendingApprovals = [];
   var approvalHistory = [];
+  var managedGrants = [];
 
   if (isAom) {
-    var managedSet = new Set(managedHubCodes.map(String));
     rows.forEach(function(r) {
-      if (!isAdmin && !managedSet.has(String(r.hubCode))) return;
+      if (!isAdmin && !managedHubSet.has(String(r.hubCode))) return;
       if (r.status === 'PENDING') {
         pendingApprovals.push(r);
       } else {
@@ -121,6 +128,48 @@ function getHubRequestInitData() {
     });
     pendingApprovals.sort(function(a, b) { return String(b.createdAt).localeCompare(String(a.createdAt)); });
     approvalHistory.sort(function(a, b) { return String(b.reviewedAt || b.createdAt).localeCompare(String(a.reviewedAt || a.createdAt)); });
+
+    // Build managed grants from Access Grants & latest Hub Access Requests
+    var grantRows = (typeof accessGrantRows_ === 'function') ? accessGrantRows_() : [];
+    var stationMap = {};
+    allStations.forEach(function(s) { stationMap[s.hubCode] = s.hubName; });
+
+    // Map latest request rows by email + hubCode for rich roleName/KPI info
+    var reqMap = {};
+    rows.forEach(function(r) {
+      if (r.status === 'APPROVED' || r.status === 'REVOKED') {
+        var k = r.email + '||' + r.hubCode;
+        if (!reqMap[k] || String(r.reviewedAt || r.createdAt) > String(reqMap[k].reviewedAt || reqMap[k].createdAt)) {
+          reqMap[k] = r;
+        }
+      }
+    });
+
+    grantRows.forEach(function(g) {
+      if (g.profile === 'DELETED' || !g.active) return;
+      (g.hubCodes || []).forEach(function(code) {
+        code = String(code);
+        if (!managedHubSet.has(code)) return;
+        var k = g.email + '||' + code;
+        var matchedReq = reqMap[k];
+        managedGrants.push({
+          email: g.email,
+          displayName: g.displayName || (matchedReq ? matchedReq.displayName : ''),
+          hubCode: code,
+          hubName: stationMap[code] || (matchedReq ? matchedReq.hubName : code),
+          roleName: matchedReq ? matchedReq.roleName : (g.profile || 'HUB_VIEWER'),
+          includeKpi: matchedReq ? matchedReq.includeKpi : (g.pages || []).indexOf('kpi') !== -1,
+          grantedBy: matchedReq ? matchedReq.reviewedBy : g.updatedBy,
+          grantedAt: matchedReq ? (matchedReq.reviewedAt || matchedReq.createdAt) : g.updatedAt,
+          note: matchedReq ? matchedReq.note : g.note,
+          requestId: matchedReq ? matchedReq.requestId : ''
+        });
+      });
+    });
+
+    managedGrants.sort(function(a, b) {
+      return String(b.grantedAt).localeCompare(String(a.grantedAt));
+    });
   }
 
   return {
@@ -134,6 +183,8 @@ function getHubRequestInitData() {
       managedHubCodes: managedHubCodes
     },
     hubs: allStations,
+    managedHubs: managedStations,
+    managedGrants: managedGrants,
     myRequests: myRequests,
     pendingApprovals: pendingApprovals,
     approvalHistory: approvalHistory.slice(0, 100),
@@ -361,5 +412,224 @@ function cancelHubAccessRequest(payload) {
     requestId: requestId,
     status: 'CANCELLED',
     message: 'Đã huỷ yêu cầu thành công.'
+  };
+}
+
+/**
+ * Endpoint: Directly grant Hub access to a user by an AOM (or Admin).
+ * Enforces that AOM can only grant access to Hubs they manage.
+ * Supports identical role names across different hubs (e.g. LEAD with KPI in Hub A, LEAD without KPI in Hub B).
+ */
+function aomGrantHubAccess(payload) {
+  var caller = requireAccess_();
+  payload = payload || {};
+  var targetEmail = normalizeEmail_(payload.targetEmail);
+  var displayName = cleanText_(payload.displayName || '', 120);
+  var hubCode = String(payload.hubCode || '').trim();
+  var roleName = cleanText_(payload.roleName || 'HUB_VIEWER', 60);
+  var includeKpi = payload.includeKpi === true || String(payload.includeKpi).toLowerCase() === 'true';
+  var note = cleanText_(payload.note || '', 500);
+
+  if (!targetEmail || !isValidEmail_(targetEmail)) {
+    throw Error('Vui lòng nhập địa chỉ email hợp lệ của nhân sự.');
+  }
+  if (!hubCode) {
+    throw Error('Vui lòng chọn Hub cần cấp quyền.');
+  }
+  if (!roleName) {
+    throw Error('Vui lòng nhập tên quyền (Role) cấp cho nhân sự.');
+  }
+
+  var permission = getPermissionModel_(false);
+  var isAdmin = caller.isAdmin || caller.rank === 'ADMIN';
+  var managedHubCodes = isAdmin
+    ? (permission.stations || []).map(function(s) { return String(s.hubCode); })
+    : getAomManagedHubCodes_(caller.email, permission);
+
+  if (!isAdmin && managedHubCodes.indexOf(hubCode) === -1) {
+    throw Error('NOT_AUTHORIZED: Bạn không quản lý Hub này. Chỉ AOM quản lý Hub hoặc Admin mới có quyền cấp.');
+  }
+
+  var station = (permission.stations || []).find(function(s) { return String(s.hubCode) === hubCode; });
+  if (!station) {
+    throw Error('HUB_NOT_FOUND: Hub không tồn tại trong hệ thống.');
+  }
+
+  if (typeof accessGrantProtected_ === 'function' && accessGrantProtected_(targetEmail)) {
+    throw Error('ADMIN_PROTECTED: Không thể cấp quyền tùy chỉnh cho tài khoản Admin hệ thống.');
+  }
+
+  var grantSheet = getDb_().getSheetByName(ACCESS_GRANT_CFG.sheet);
+  if (!grantSheet) {
+    grantSheet = getDb_().insertSheet(ACCESS_GRANT_CFG.sheet);
+    grantSheet.getRange(1, 1, 1, ACCESS_GRANT_CFG.headers.length).setValues([ACCESS_GRANT_CFG.headers.slice()]);
+  }
+
+  var grants = accessGrantRows_();
+  var existingGrant = grants.find(function(g) { return g.email === targetEmail; });
+
+  var targetPages = ['dashboard', 'd0'];
+  if (includeKpi) {
+    targetPages.push('kpi');
+  }
+
+  var grantNote = 'Cấp bởi AOM ' + caller.email + ' vào Hub ' + station.hubName + ' (' + roleName + (includeKpi ? ' + KPI' : ' - không KPI') + ')';
+  if (note) grantNote += ' - ' + note;
+
+  if (existingGrant) {
+    var hubCodes = Array.from(new Set(existingGrant.hubCodes.concat([hubCode])));
+    var mergedPages = Array.from(new Set(existingGrant.pages.concat(targetPages)));
+    var existingNote = existingGrant.note ? existingGrant.note + ' | ' + grantNote : grantNote;
+
+    var cleanGrant = accessGrantClean_({
+      email: existingGrant.email,
+      displayName: displayName || existingGrant.displayName || displayNameFromEmail_(targetEmail),
+      profile: existingGrant.profile === 'DELETED' ? 'CUSTOM' : existingGrant.profile,
+      active: true,
+      hubCodes: hubCodes,
+      pages: mergedPages,
+      note: existingNote,
+      revision: existingGrant.revision
+    });
+    accessGrantWrite_(cleanGrant, caller, cleanGrant.revision);
+  } else {
+    var newGrantClean = accessGrantClean_({
+      email: targetEmail,
+      displayName: displayName || displayNameFromEmail_(targetEmail),
+      profile: 'CUSTOM',
+      active: true,
+      hubCodes: [hubCode],
+      pages: targetPages,
+      note: grantNote,
+      revision: ''
+    });
+    accessGrantWrite_(newGrantClean, caller, '');
+  }
+
+  // Update or append in Hub Access Requests sheet for tracking & duplicate role support
+  var now = new Date().toISOString();
+  var reqSheet = getHubRequestSheet_();
+  var rows = readHubRequestRows_();
+  var pendingReq = rows.find(function(r) {
+    return r.email === targetEmail && r.hubCode === hubCode && r.status === 'PENDING';
+  });
+
+  if (pendingReq) {
+    reqSheet.getRange(pendingReq.rowNumber, 6, 1, 6).setValues([[
+      roleName,
+      includeKpi,
+      'APPROVED',
+      note || pendingReq.note,
+      pendingReq.createdAt,
+      caller.email
+    ]]);
+    reqSheet.getRange(pendingReq.rowNumber, 12, 1, 1).setValue(now);
+  } else {
+    var reqId = 'DIR-' + Date.now().toString(36).toUpperCase() + '-' + Math.random().toString(36).slice(2, 6).toUpperCase();
+    reqSheet.appendRow([
+      reqId,
+      targetEmail,
+      displayName || displayNameFromEmail_(targetEmail),
+      hubCode,
+      station.hubName,
+      roleName,
+      includeKpi,
+      'APPROVED',
+      note || ('Cấp quyền trực tiếp bởi AOM ' + caller.email),
+      now,
+      caller.email,
+      now,
+      ''
+    ]);
+  }
+
+  SpreadsheetApp.flush();
+  clearSecurityCaches_();
+
+  return {
+    ok: true,
+    message: 'Đã cấp quyền Hub ' + station.hubName + ' (' + roleName + (includeKpi ? ' + KPI' : ' - không KPI') + ') cho ' + targetEmail + ' thành công!'
+  };
+}
+
+/**
+ * Endpoint: Revoke Hub access from a user for a specific Hub.
+ * Enforces that AOM can only revoke access for Hubs they manage.
+ */
+function aomRevokeHubAccess(payload) {
+  var caller = requireAccess_();
+  payload = payload || {};
+  var targetEmail = normalizeEmail_(payload.targetEmail);
+  var hubCode = String(payload.hubCode || '').trim();
+
+  if (!targetEmail) throw Error('TARGET_EMAIL_REQUIRED');
+  if (!hubCode) throw Error('HUB_CODE_REQUIRED');
+
+  var permission = getPermissionModel_(false);
+  var isAdmin = caller.isAdmin || caller.rank === 'ADMIN';
+  var managedHubCodes = isAdmin
+    ? (permission.stations || []).map(function(s) { return String(s.hubCode); })
+    : getAomManagedHubCodes_(caller.email, permission);
+
+  if (!isAdmin && managedHubCodes.indexOf(hubCode) === -1) {
+    throw Error('NOT_AUTHORIZED: Bạn không quản lý Hub này. Chỉ AOM quản lý Hub hoặc Admin mới có quyền thu hồi.');
+  }
+
+  var station = (permission.stations || []).find(function(s) { return String(s.hubCode) === hubCode; });
+  var hubName = station ? station.hubName : hubCode;
+
+  // 1. Remove hubCode from Access Grants
+  var grants = accessGrantRows_();
+  var targetGrant = grants.find(function(g) { return g.email === targetEmail; });
+  if (targetGrant) {
+    var newHubCodes = targetGrant.hubCodes.filter(function(c) { return String(c) !== hubCode; });
+    if (newHubCodes.length === 0) {
+      accessGrantWrite_({
+        email: targetGrant.email,
+        displayName: targetGrant.displayName,
+        profile: 'DELETED',
+        active: false,
+        hubCodes: [],
+        pages: [],
+        note: (targetGrant.note || '') + ' | Đã thu hồi quyền Hub ' + hubName + ' bởi AOM ' + caller.email
+      }, caller, targetGrant.revision);
+    } else {
+      var cleanGrant = accessGrantClean_({
+        email: targetGrant.email,
+        displayName: targetGrant.displayName,
+        profile: targetGrant.profile === 'DELETED' ? 'CUSTOM' : targetGrant.profile,
+        active: targetGrant.active,
+        hubCodes: newHubCodes,
+        pages: targetGrant.pages,
+        note: (targetGrant.note || '') + ' | Thu hồi Hub ' + hubName + ' bởi AOM ' + caller.email,
+        revision: targetGrant.revision
+      });
+      accessGrantWrite_(cleanGrant, caller, targetGrant.revision);
+    }
+  }
+
+  // 2. Update Hub Access Requests status to REVOKED
+  var reqSheet = getHubRequestSheet_();
+  var rows = readHubRequestRows_();
+  var now = new Date().toISOString();
+  rows.forEach(function(r) {
+    if (r.email === targetEmail && r.hubCode === hubCode && r.status === 'APPROVED') {
+      reqSheet.getRange(r.rowNumber, 8, 1, 6).setValues([[
+        'REVOKED',
+        r.note,
+        r.createdAt,
+        caller.email,
+        now,
+        'Thu hồi quyền bởi AOM ' + caller.email
+      ]]);
+    }
+  });
+
+  SpreadsheetApp.flush();
+  clearSecurityCaches_();
+
+  return {
+    ok: true,
+    message: 'Đã thu hồi quyền truy cập Hub ' + hubName + ' của ' + targetEmail + '.'
   };
 }

@@ -6295,13 +6295,13 @@ var designNav=[
  ['compensated','Compensated & Lost','shield'],['premises','Premises information','building'],
  ['weather','Weather','cloud'],['market','Market intel','globe'],
  ['solution','Backlog Solution','route'],['rulebook','Rulebook detail','book'],
- ['definition','Definition','info'],['hub-request','Xin cấp quyền Hub','key'],['admin','Admin','settings']
+ ['definition','Definition','info'],['hub-request','Cấp quyền Hub (AOM)','key'],['admin','Admin','settings']
 ];
 function designNavIcon(key){
  var paths={gauge:'<path d="M4.9 19a9 9 0 1 1 14.2 0M12 13l4-5M4 13h2M7 7l1.5 1.5M12 4v2M17 7l-1.5 1.5M18 13h2"/><circle cx="12" cy="13" r="1.5"/>',snapshot:'<rect x="3" y="3" width="7" height="7" rx="1.5"/><rect x="14" y="3" width="7" height="7" rx="1.5"/><rect x="3" y="14" width="7" height="7" rx="1.5"/><rect x="14" y="14" width="7" height="7" rx="1.5"/>',truck:'<path d="M3 6h11v11H3zM14 10h4l3 4v3h-7"/><circle cx="7" cy="18" r="2"/><circle cx="18" cy="18" r="2"/>',chart:'<path d="M4 3v18h17M8 16v-5M13 16V7M18 16V4"/>',bell:'<path d="M18 8a6 6 0 0 0-12 0c0 7-3 7-3 9h18c0-2-3-2-3-9M10 21h4"/>',calendar:'<rect x="3" y="5" width="18" height="16" rx="2"/><path d="M7 3v4M17 3v4M3 10h18M8 14h3M8 17h6"/>',stack:'<path d="m12 3 10 5-10 5L2 8zM2 12l10 5 10-5M2 16l10 5 10-5"/>',bike:'<circle cx="5" cy="17" r="4"/><circle cx="19" cy="17" r="4"/><path d="m5 17 5-8 5 8H5M10 9H7M15 5h3l1 12M10 9h8"/>',users:'<circle cx="9" cy="7" r="3"/><path d="M3 21v-3a6 6 0 0 1 12 0v3M16 4a3 3 0 0 1 0 6M18 14a5 5 0 0 1 3 5v2"/>',wallet:'<rect x="3" y="6" width="18" height="15" rx="2"/><path d="M3 9V5l14-3v4M21 11h-6v6h6M17 14h.01"/>',shield:'<path d="m12 3 8 3v6c0 5-8 9-8 9s-8-4-8-9V6zM9 9l6 6M15 9l-6 6"/>',building:'<rect x="5" y="3" width="14" height="18" rx="1.5"/><path d="M9 7h1M14 7h1M9 11h1M14 11h1M10 21v-5h4v5M2 21h20"/>',cloud:'<path d="M7 17H6a4 4 0 1 1 1-8 6 6 0 0 1 11 2 3 3 0 0 1 0 6H7M8 20l-1 2M13 20l-1 2M18 20l-1 2"/>',globe:'<circle cx="12" cy="12" r="9"/><ellipse cx="12" cy="12" rx="4" ry="9"/><path d="M3 12h18"/>',route:'<circle cx="5" cy="5" r="2"/><circle cx="19" cy="19" r="2"/><path d="M7 5h9a4 4 0 0 1 0 8H8a4 4 0 0 0 0 8h6M11 18l3 3-3 3"/>',book:'<path d="M12 5v16M12 5c-3-2-6-2-10-1v15c4-1 7-1 10 2 3-3 6-3 10-2V4c-4-1-7-1-10 1"/>',info:'<circle cx="12" cy="12" r="9"/><path d="M12 11v6M12 7h.01"/>',key:'<circle cx="7.5" cy="15.5" r="4.5"/><path d="m21 4.5-9.5 9.5M16 4.5l4 4M13.5 7l2.5 2.5"/>',settings:'<path d="m10 3-1 3-3 1-3 3 2 2-2 2 3 3 3 1 1 3h4l1-3 3-1 3-3-2-2 2-2-3-3-3-1-1-3z"/><circle cx="12" cy="12" r="3"/>'};
  return '<svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">'+(paths[key]||paths.info)+'</svg>';
 }
-function designPageName(key){var row=designNav.find(function(n){return n[0]===key});return row?row[1]:({'d0-attendance':'Attendance D0','web-visits':'Web Analytics',feedback:'Góp ý', 'hub-request':'Xin cấp quyền Hub','feedback-admin':'Customer Feedback',monitor:'System Monitor',users:'Set Account',data:'Data Management',settings:'Settings'}[key]||'Performance Control Center')}
+function designPageName(key){var row=designNav.find(function(n){return n[0]===key});return row?row[1]:({'d0-attendance':'Attendance D0','web-visits':'Web Analytics',feedback:'Góp ý', 'hub-request':'Cấp quyền Hub (AOM)','feedback-admin':'Customer Feedback',monitor:'System Monitor',users:'Set Account',data:'Data Management',settings:'Settings'}[key]||'Performance Control Center')}
 function sidebarItemConnected(key){
  if(!isNormalAccount()&&['dashboard','kpi','alerts','d0','backlog','compensated','rulebook','admin','monitor','users','data','settings','permissions','web-visits','hub-request'].includes(key))return true;
  // These pages open configured modules; the remaining pages are placeholders.
@@ -10135,7 +10135,8 @@ var releaseFooter=designFooter;designFooter=function(){return releaseFooter().re
     if(state.bootReady){enforceLandingPageForAccess_();render();if(!isNormalAccount()){setTimeout(function(){scheduleKpiLoad(false)},0);setTimeout(function(){scheduleForecastLoad(false)},0);setTimeout(startScheduledDataRefreshWatcher_,900)}}else{bootstrapWorkspace(false)}
     
 // =====================================================================
-// HUB ACCESS REQUEST & APPROVAL MODULE (Xin cấp quyền Hub)
+// =====================================================================
+// HUB ACCESS MANAGEMENT MODULE (Cấp quyền Hub - Quản lý Hub / AOM)
 // =====================================================================
 var HubRequestUI = {
   data: null,
@@ -10143,18 +10144,33 @@ var HubRequestUI = {
   busy: false,
   error: '',
   message: '',
-  activeTab: 'request', // 'request' | 'approval'
-  filterStatus: 'PENDING',
-  searchApproval: '',
-  searchMyReq: '',
-  hubFilter: '',
-  form: {
+  activeTab: 'grant', // 'grant' | 'approval' | 'my-requests' | 'request'
+  // Direct grant form state (for AOM & Admin)
+  directForm: {
+    targetEmail: '',
+    displayName: '',
     hubCode: '',
     roleName: 'HUB_VIEWER',
     customRole: '',
     includeKpi: false,
     note: ''
   },
+  // Active grants filter & search
+  searchGrants: '',
+  grantHubFilter: '',
+  // Self-request form state (for normal users)
+  requestForm: {
+    hubCode: '',
+    roleName: 'HUB_VIEWER',
+    customRole: '',
+    includeKpi: false,
+    note: ''
+  },
+  // Approvals filter & search
+  filterStatus: 'PENDING',
+  searchApproval: '',
+  hubApprovalFilter: '',
+  searchMyReq: '',
   rejectModal: {
     show: false,
     requestId: '',
@@ -10181,18 +10197,26 @@ function hubRequestLoad_() {
   hubRequestRpc_('getHubRequestInitData', []).then(function(res) {
     HubRequestUI.data = res;
     HubRequestUI.loading = false;
+    var isAomOrAdmin = res.user && (res.user.isAdmin || res.user.isAom);
+    if (!HubRequestUI.activeTab || (!isAomOrAdmin && HubRequestUI.activeTab === 'grant')) {
+      HubRequestUI.activeTab = isAomOrAdmin ? 'grant' : 'request';
+    }
+    if (!HubRequestUI.directForm.hubCode && res.managedHubs && res.managedHubs.length > 0) {
+      HubRequestUI.directForm.hubCode = res.managedHubs[0].hubCode;
+    }
     render();
   }).catch(function(err) {
     HubRequestUI.loading = false;
-    HubRequestUI.error = err.message || 'Không thể tải dữ liệu cấp quyền Hub.';
+    HubRequestUI.error = err.message || 'Không thể tải dữ liệu phân quyền Hub.';
     render();
   });
 }
 
 function hubRequestStatusBadge_(status) {
   status = String(status || 'PENDING').toUpperCase();
-  if (status === 'APPROVED') return '<span class="hr-pill hr-pill-approved">✓ Đã duyệt</span>';
+  if (status === 'APPROVED') return '<span class="hr-pill hr-pill-approved">✓ Đã cấp/duyệt</span>';
   if (status === 'REJECTED') return '<span class="hr-pill hr-pill-rejected">✕ Từ chối</span>';
+  if (status === 'REVOKED') return '<span class="hr-pill hr-pill-cancelled">⊘ Đã thu hồi</span>';
   if (status === 'CANCELLED') return '<span class="hr-pill hr-pill-cancelled">⊘ Đã huỷ</span>';
   return '<span class="hr-pill hr-pill-pending">⏳ Chờ duyệt</span>';
 }
@@ -10216,9 +10240,82 @@ function hubRequestFormatDate_(isoStr) {
   }
 }
 
+// AOM DIRECT GRANT
+function hubDirectGrantSubmit_() {
+  if (HubRequestUI.busy) return;
+  var f = HubRequestUI.directForm;
+  var role = f.roleName === 'CUSTOM' ? (f.customRole || '').trim() : f.roleName;
+  if (!f.targetEmail) {
+    HubRequestUI.error = 'Vui lòng nhập email nhân sự cần cấp quyền.';
+    render();
+    return;
+  }
+  if (!f.hubCode) {
+    HubRequestUI.error = 'Vui lòng chọn Hub cần cấp quyền.';
+    render();
+    return;
+  }
+  if (!role) {
+    HubRequestUI.error = 'Vui lòng nhập tên quyền (Role) cấp cho nhân sự.';
+    render();
+    return;
+  }
+
+  HubRequestUI.busy = true;
+  HubRequestUI.error = '';
+  HubRequestUI.message = '';
+  render();
+
+  hubRequestRpc_('aomGrantHubAccess', [{
+    targetEmail: f.targetEmail,
+    displayName: f.displayName,
+    hubCode: f.hubCode,
+    roleName: role,
+    includeKpi: f.includeKpi,
+    note: f.note
+  }]).then(function(res) {
+    HubRequestUI.busy = false;
+    HubRequestUI.message = res.message || 'Đã cấp quyền Hub thành công!';
+    toast(HubRequestUI.message);
+    HubRequestUI.directForm.targetEmail = '';
+    HubRequestUI.directForm.displayName = '';
+    HubRequestUI.directForm.note = '';
+    hubRequestLoad_();
+  }).catch(function(err) {
+    HubRequestUI.busy = false;
+    HubRequestUI.error = err.message || 'Lỗi khi cấp quyền Hub.';
+    render();
+  });
+}
+
+// AOM DIRECT REVOKE
+function hubDirectRevoke_(email, hubCode, hubName) {
+  if (HubRequestUI.busy) return;
+  if (!confirm('Bạn có chắc chắn muốn THU HỒI quyền truy cập Hub ' + hubName + ' (' + hubCode + ') của tài khoản ' + email + '?')) return;
+  HubRequestUI.busy = true;
+  HubRequestUI.error = '';
+  HubRequestUI.message = '';
+  render();
+
+  hubRequestRpc_('aomRevokeHubAccess', [{
+    targetEmail: email,
+    hubCode: hubCode
+  }]).then(function(res) {
+    HubRequestUI.busy = false;
+    HubRequestUI.message = res.message || 'Đã thu hồi quyền thành công!';
+    toast(HubRequestUI.message);
+    hubRequestLoad_();
+  }).catch(function(err) {
+    HubRequestUI.busy = false;
+    HubRequestUI.error = err.message || 'Lỗi khi thu hồi quyền.';
+    render();
+  });
+}
+
+// SELF-REQUEST SUBMIT
 function hubRequestSubmit_() {
   if (HubRequestUI.busy) return;
-  var f = HubRequestUI.form;
+  var f = HubRequestUI.requestForm;
   var role = f.roleName === 'CUSTOM' ? (f.customRole || '').trim() : f.roleName;
   if (!f.hubCode) {
     HubRequestUI.error = 'Vui lòng chọn Hub cần xin cấp quyền.';
@@ -10242,8 +10339,9 @@ function hubRequestSubmit_() {
   }]).then(function(res) {
     HubRequestUI.busy = false;
     HubRequestUI.message = res.message || 'Đã gửi yêu cầu xin cấp quyền Hub thành công!';
-    HubRequestUI.form.note = '';
-    HubRequestUI.form.hubCode = '';
+    toast(HubRequestUI.message);
+    HubRequestUI.requestForm.note = '';
+    HubRequestUI.requestForm.hubCode = '';
     hubRequestLoad_();
   }).catch(function(err) {
     HubRequestUI.busy = false;
@@ -10252,6 +10350,7 @@ function hubRequestSubmit_() {
   });
 }
 
+// APPROVE REQUEST
 function hubRequestApprove_(requestId) {
   if (HubRequestUI.busy) return;
   if (!confirm('Bạn có chắc chắn muốn DUYỆT yêu cầu này và cấp quyền cho người dùng?')) return;
@@ -10274,6 +10373,7 @@ function hubRequestApprove_(requestId) {
   });
 }
 
+// REJECT REQUEST
 function hubRequestConfirmReject_() {
   if (HubRequestUI.busy) return;
   var m = HubRequestUI.rejectModal;
@@ -10297,6 +10397,7 @@ function hubRequestConfirmReject_() {
   });
 }
 
+// CANCEL OWN REQUEST
 function hubRequestCancel_(requestId) {
   if (HubRequestUI.busy) return;
   if (!confirm('Bạn có chắc chắn muốn huỷ yêu cầu này?')) return;
@@ -10316,13 +10417,13 @@ function hubRequestCancel_(requestId) {
 }
 
 function hubRequestPage_() {
-  var s = HubRequestUI, d = s.data, f = s.form;
+  var s = HubRequestUI, d = s.data;
   var head = '<div class="hr-wrap">' +
     '<header class="hr-head">' +
       '<div>' +
         '<span class="page-eyebrow">PHÂN QUYỀN VẬN HÀNH HUB</span>' +
-        '<h1>Xin cấp quyền Hub & Duyệt phân quyền</h1>' +
-        '<p>Đăng ký xin cấp quyền truy cập Hub (có hoặc không có KPI) hoặc AOM & Admin phê duyệt theo phạm vi quản lý.</p>' +
+        '<h1>Cấp quyền Hub (AOM) & Duyệt phân quyền</h1>' +
+        '<p>AOM cấp quyền truy cập các Hub thuộc phạm vi quản lý cho nhân sự (tùy chọn báo cáo KPI) hoặc phê duyệt đơn đăng ký.</p>' +
       '</div>' +
       '<button id="hrReloadBtn" class="hr-refresh-btn" ' + (s.loading || s.busy ? 'disabled' : '') + '>' +
         '<svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 2v6h-6M3 12a9 9 0 0 1 15-6.7L21 8M3 22v-6h6M21 12a9 9 0 0 1-15 6.7L3 16"/></svg>' +
@@ -10340,16 +10441,26 @@ function hubRequestPage_() {
   var isAomOrAdmin = d.user && (d.user.isAdmin || d.user.isAom);
   var pendingCount = (d.pendingApprovals || []).length;
 
-  var tabs = '<nav class="hr-tabs">' +
-    '<button class="hr-tab ' + (s.activeTab === 'request' ? 'active' : '') + '" data-hr-tab="request">' +
+  var tabs = '<nav class="hr-tabs">';
+  if (isAomOrAdmin) {
+    tabs += '<button class="hr-tab ' + (s.activeTab === 'grant' ? 'active' : '') + '" data-hr-tab="grant">' +
+      '🔑 AOM Cấp quyền Hub' +
+    '</button>' +
+    '<button class="hr-tab ' + (s.activeTab === 'approval' ? 'active' : '') + '" data-hr-tab="approval">' +
+      '🛡️ Duyệt yêu cầu ' + (pendingCount > 0 ? '<span class="hr-badge-count">' + pendingCount + '</span>' : '') +
+    '</button>' +
+    '<button class="hr-tab ' + (s.activeTab === 'my-requests' ? 'active' : '') + '" data-hr-tab="my-requests">' +
+      '📝 Yêu cầu của tôi' +
+    '</button>';
+  } else {
+    tabs += '<button class="hr-tab ' + (s.activeTab === 'request' ? 'active' : '') + '" data-hr-tab="request">' +
       '📝 Xin cấp quyền Hub' +
     '</button>' +
-    (isAomOrAdmin
-      ? '<button class="hr-tab ' + (s.activeTab === 'approval' ? 'active' : '') + '" data-hr-tab="approval">' +
-          '🛡️ Duyệt yêu cầu ' + (pendingCount > 0 ? '<span class="hr-badge-count">' + pendingCount + '</span>' : '') +
-        '</button>'
-      : '') +
-  '</nav>';
+    '<button class="hr-tab ' + (s.activeTab === 'my-requests' ? 'active' : '') + '" data-hr-tab="my-requests">' +
+      '📋 Tiến độ đơn đã gửi' +
+    '</button>';
+  }
+  tabs += '</nav>';
 
   var alerts = '';
   if (s.message) {
@@ -10361,13 +10472,141 @@ function hubRequestPage_() {
 
   var body = '';
 
-  if (s.activeTab === 'request') {
-    // --- TAB 1: XIN CẤP QUYỀN ---
-    var selectedStation = (d.hubs || []).find(function(h) { return h.hubCode === f.hubCode; });
-    var aomList = selectedStation ? (selectedStation.aom || []).concat(selectedStation.saom || []) : [];
+  if (s.activeTab === 'grant' && isAomOrAdmin) {
+    // =========================================================================
+    // TAB: AOM CẤP QUYỀN TRỰC TIẾP CHO NHÂN SỰ
+    // =========================================================================
+    var f = s.directForm;
+    var selectedStation = (d.managedHubs || []).find(function(h) { return h.hubCode === f.hubCode; });
 
     var formHtml = '<section class="hr-panel">' +
-      '<h2 class="hr-panel-title">Đăng ký xin cấp quyền</h2>' +
+      '<h2 class="hr-panel-title">Cấp quyền người dùng vào Hub</h2>' +
+      '<p class="hr-panel-desc">AOM cấp quyền trực tiếp cho nhân sự vào Hub do bạn quản lý. Có hiệu lực ngay lập tức.</p>' +
+      '<form id="hrDirectForm">' +
+        '<div class="hr-form-group">' +
+          '<label for="hrDirectEmail">Email nhân sự được cấp quyền *</label>' +
+          '<input type="email" id="hrDirectEmail" required placeholder="nhanvien@spxexpress.com hoặc @shopee.com" value="' + e(f.targetEmail) + '">' +
+        '</div>' +
+        '<div class="hr-form-group">' +
+          '<label for="hrDirectName">Họ và tên nhân sự</label>' +
+          '<input type="text" id="hrDirectName" placeholder="Ví dụ: Nguyễn Văn A (không bắt buộc)" value="' + e(f.displayName) + '">' +
+        '</div>' +
+        '<div class="hr-form-group">' +
+          '<label for="hrDirectHub">Chọn Hub cấp quyền * <small style="color:var(--ag-primary,#1f64a5);font-weight:600;">(' + (d.managedHubs || []).length + ' Hubs bạn quản lý)</small></label>' +
+          '<select id="hrDirectHub" required>' +
+            (!f.hubCode ? '<option value="">-- Chọn Hub quản lý --</option>' : '') +
+            (d.managedHubs || []).map(function(h) {
+              return '<option value="' + e(h.hubCode) + '" ' + (f.hubCode === h.hubCode ? 'selected' : '') + '>' +
+                e(h.hubName + (h.zone ? ' [' + h.zone + ']' : '') + ' (' + h.hubCode + ')') +
+              '</option>';
+            }).join('') +
+          '</select>' +
+          (selectedStation
+            ? '<div class="hr-hub-info">📍 <b>Hub:</b> ' + e(selectedStation.hubName) + ' (' + e(selectedStation.hubCode) + ')' + (selectedStation.zone ? ' • Khu vực: ' + e(selectedStation.zone) : '') + '</div>'
+            : '') +
+        '</div>' +
+        '<div class="hr-form-group">' +
+          '<label for="hrDirectRole">Tên cấp quyền (Role name) *</label>' +
+          '<select id="hrDirectRole">' +
+            (d.standardRoles || []).map(function(r) {
+              return '<option value="' + e(r.id) + '" ' + (f.roleName === r.id ? 'selected' : '') + '>' + e(r.name) + '</option>';
+            }).join('') +
+          '</select>' +
+          (f.roleName === 'CUSTOM'
+            ? '<input type="text" id="hrDirectCustomRole" value="' + e(f.customRole) + '" placeholder="Nhập tên cấp quyền mong muốn (e.g. Lead Ca Sáng)..." style="margin-top:6px;">'
+            : '') +
+          '<div class="hr-role-hint">💡 <i>Tên cấp quyền có thể trùng nhau giữa các Hub (ví dụ: nhân sự có thể có quyền LEAD ở Hub này có KPI, và LEAD ở Hub khác không có KPI).</i></div>' +
+        '</div>' +
+        '<div class="hr-kpi-card ' + (f.includeKpi ? 'checked' : '') + '">' +
+          '<label class="hr-kpi-row">' +
+            '<input type="checkbox" id="hrDirectIncludeKpi" ' + (f.includeKpi ? 'checked' : '') + '>' +
+            '<div class="hr-kpi-text">' +
+              '<b>Bao gồm phần KPI (Xem báo cáo & chỉ số KPI cho Hub này)</b>' +
+              '<small>Bật tùy chọn này để nhân sự có quyền xem Dashboard KPI, % Ontime, % Deli Success của Hub. Cấu hình này độc lập theo từng Hub.</small>' +
+            '</div>' +
+          '</label>' +
+        '</div>' +
+        '<div class="hr-form-group">' +
+          '<label for="hrDirectNote">Ghi chú / Mục đích phân quyền</label>' +
+          '<textarea id="hrDirectNote" rows="2" placeholder="Nhập ghi chú phân quyền (e.g. Điều phối hàng hoá ca chiều, Lead Hub)...">' + e(f.note) + '</textarea>' +
+        '</div>' +
+        '<button type="submit" id="hrDirectSubmitBtn" class="hr-submit-btn" ' + (s.busy ? 'disabled' : '') + '>' +
+          (s.busy ? 'Đang cấp quyền…' : '✓ Cấp quyền ngay cho nhân sự') +
+        '</button>' +
+      '</form>' +
+    '</section>';
+
+    var allGrants = d.managedGrants || [];
+    var filteredGrants = allGrants.filter(function(g) {
+      if (s.grantHubFilter && g.hubCode !== s.grantHubFilter) return false;
+      if (s.searchGrants) {
+        var q = s.searchGrants.toLowerCase();
+        return g.email.toLowerCase().includes(q) ||
+               (g.displayName || '').toLowerCase().includes(q) ||
+               g.hubName.toLowerCase().includes(q) ||
+               g.hubCode.toLowerCase().includes(q) ||
+               (g.roleName || '').toLowerCase().includes(q);
+      }
+      return true;
+    });
+
+    var managedHubOptions = (d.managedHubs || []).map(function(h) {
+      return '<option value="' + e(h.hubCode) + '" ' + (s.grantHubFilter === h.hubCode ? 'selected' : '') + '>' + e(h.hubName) + '</option>';
+    }).join('');
+
+    var grantsHtml = '<section class="hr-panel">' +
+      '<div class="hr-panel-title">' +
+        '<span>Nhân sự đã được cấp quyền</span>' +
+        '<span style="font-size:12px;font-weight:600;color:var(--ag-primary,#1f64a5);background:#e0f2fe;padding:2px 8px;border-radius:12px;">' + allGrants.length + ' phân quyền</span>' +
+      '</div>' +
+      '<p class="hr-panel-desc">Toàn bộ nhân sự đang có quyền truy cập vào các Hub bạn quản lý. Bạn có thể thu hồi quyền bất kỳ lúc nào.</p>' +
+      '<div style="display:flex;gap:10px;margin-bottom:12px;flex-wrap:wrap;">' +
+        '<select id="hrGrantHubFilter" style="padding:7px 10px;border:1px solid #cbd5e1;border-radius:6px;font-size:12.5px;max-width:200px;">' +
+          '<option value="">Tất cả Hub của bạn (' + (d.managedHubs || []).length + ' Hubs)</option>' +
+          managedHubOptions +
+        '</select>' +
+        '<input type="search" id="hrSearchGrants" value="' + e(s.searchGrants) + '" placeholder="Tìm theo Email, Tên, Hub, Role..." style="flex:1;min-width:180px;box-sizing:border-box;padding:7px 11px;border:1px solid #cbd5e1;border-radius:6px;font-size:12.5px;">' +
+      '</div>' +
+      (!filteredGrants.length
+        ? '<div class="hr-empty"><div class="hr-empty-icon">👥</div>Chưa có nhân sự nào được cấp quyền trong các Hub bạn chọn.</div>'
+        : '<div class="hr-table-container"><table class="hr-table">' +
+            '<thead>' +
+              '<tr>' +
+                '<th>Hub</th>' +
+                '<th>Nhân sự</th>' +
+                '<th>Tên quyền (Role)</th>' +
+                '<th>Phần KPI</th>' +
+                '<th>Người cấp / Ngày</th>' +
+                '<th>Thao tác</th>' +
+              '</tr>' +
+            '</thead>' +
+            '<tbody>' +
+              filteredGrants.map(function(g) {
+                return '<tr>' +
+                  '<td><b>' + e(g.hubName) + '</b><small style="display:block;color:#64748b;font-size:11px;">' + e(g.hubCode) + '</small></td>' +
+                  '<td><b>' + e(g.displayName || g.email) + '</b><small style="display:block;color:#64748b;font-size:11px;">' + e(g.email) + '</small></td>' +
+                  '<td><span class="hr-role-badge">' + e(g.roleName) + '</span></td>' +
+                  '<td>' + hubRequestKpiBadge_(g.includeKpi) + '</td>' +
+                  '<td><small>' + (g.grantedBy ? e(g.grantedBy) + '<br>' : '') + hubRequestFormatDate_(g.grantedAt) + '</small></td>' +
+                  '<td><button class="hr-btn-revoke" data-hr-revoke-email="' + e(g.email) + '" data-hr-revoke-hub="' + e(g.hubCode) + '" data-hr-revoke-name="' + e(g.hubName) + '" title="Thu hồi quyền truy cập Hub này">Thu hồi</button></td>' +
+                '</tr>';
+              }).join('') +
+            '</tbody>' +
+          '</table></div>') +
+    '</section>';
+
+    body = '<div class="hr-grid">' + formHtml + grantsHtml + '</div>';
+
+  } else if (s.activeTab === 'request') {
+    // =========================================================================
+    // TAB: XIN CẤP QUYỀN (Dành cho tài khoản thường / gửi yêu cầu vào Hub)
+    // =========================================================================
+    var rf = s.requestForm;
+    var selectedReqStation = (d.hubs || []).find(function(h) { return h.hubCode === rf.hubCode; });
+    var aomList = selectedReqStation ? (selectedReqStation.aom || []).concat(selectedReqStation.saom || []) : [];
+
+    var reqFormHtml = '<section class="hr-panel">' +
+      '<h2 class="hr-panel-title">Đăng ký xin cấp quyền Hub</h2>' +
       '<p class="hr-panel-desc">Gửi yêu cầu xin cấp quyền truy cập Hub đến AOM quản lý Hub đó hoặc Admin phê duyệt.</p>' +
       '<form id="hrRequestForm">' +
         '<div class="hr-form-group">' +
@@ -10379,12 +10618,12 @@ function hubRequestPage_() {
           '<select id="hrHubSelect" required>' +
             '<option value="">-- Chọn Hub (' + d.hubs.length + ' Hubs) --</option>' +
             (d.hubs || []).map(function(h) {
-              return '<option value="' + e(h.hubCode) + '" ' + (f.hubCode === h.hubCode ? 'selected' : '') + '>' +
+              return '<option value="' + e(h.hubCode) + '" ' + (rf.hubCode === h.hubCode ? 'selected' : '') + '>' +
                 e(h.hubName + (h.zone ? ' [' + h.zone + ']' : '') + ' (' + h.hubCode + ')') +
               '</option>';
             }).join('') +
           '</select>' +
-          (selectedStation
+          (selectedReqStation
             ? '<div class="hr-hub-info">📍 <b>Người duyệt phụ trách:</b> ' + (aomList.length ? e(aomList.join(', ')) : 'Admin hệ thống') + '</div>'
             : '') +
         '</div>' +
@@ -10392,17 +10631,17 @@ function hubRequestPage_() {
           '<label for="hrRoleSelect">Tên cấp quyền (Role name) *</label>' +
           '<select id="hrRoleSelect">' +
             (d.standardRoles || []).map(function(r) {
-              return '<option value="' + e(r.id) + '" ' + (f.roleName === r.id ? 'selected' : '') + '>' + e(r.name) + '</option>';
+              return '<option value="' + e(r.id) + '" ' + (rf.roleName === r.id ? 'selected' : '') + '>' + e(r.name) + '</option>';
             }).join('') +
           '</select>' +
-          (f.roleName === 'CUSTOM'
-            ? '<input type="text" id="hrCustomRole" value="' + e(f.customRole) + '" placeholder="Nhập tên cấp quyền mong muốn (e.g. Lead Ca Sáng)..." style="margin-top:6px;">'
+          (rf.roleName === 'CUSTOM'
+            ? '<input type="text" id="hrCustomRole" value="' + e(rf.customRole) + '" placeholder="Nhập tên cấp quyền mong muốn (e.g. Lead Ca Sáng)..." style="margin-top:6px;">'
             : '') +
           '<div class="hr-role-hint">💡 <i>Tên cấp quyền có thể trùng nhau giữa các Hub (ví dụ: cùng là Lead nhưng Hub này được xem KPI còn Hub khác chỉ xem vận hành thông thường).</i></div>' +
         '</div>' +
-        '<div class="hr-kpi-card ' + (f.includeKpi ? 'checked' : '') + '">' +
+        '<div class="hr-kpi-card ' + (rf.includeKpi ? 'checked' : '') + '">' +
           '<label class="hr-kpi-row">' +
-            '<input type="checkbox" id="hrIncludeKpi" ' + (f.includeKpi ? 'checked' : '') + '>' +
+            '<input type="checkbox" id="hrIncludeKpi" ' + (rf.includeKpi ? 'checked' : '') + '>' +
             '<div class="hr-kpi-text">' +
               '<b>Bao gồm phần KPI (Xem báo cáo & chỉ số KPI cho Hub này)</b>' +
               '<small>Bật tùy chọn này nếu bạn cần xem dữ liệu KPI, % Ontime, % Deli Success của Hub. Tùy chọn này độc lập theo từng Hub xin quyền.</small>' +
@@ -10411,7 +10650,7 @@ function hubRequestPage_() {
         '</div>' +
         '<div class="hr-form-group">' +
           '<label for="hrNote">Lý do xin cấp quyền / Ghi chú</label>' +
-          '<textarea id="hrNote" rows="3" placeholder="Nhập lý do xin quyền (e.g. Điều phối hàng hoá ca chiều, phụ trách thêm địa bàn)...">' + e(f.note) + '</textarea>' +
+          '<textarea id="hrNote" rows="3" placeholder="Nhập lý do xin quyền (e.g. Điều phối hàng hoá ca chiều, phụ trách thêm địa bàn)...">' + e(rf.note) + '</textarea>' +
         '</div>' +
         '<button type="submit" id="hrSubmitBtn" class="hr-submit-btn" ' + (s.busy ? 'disabled' : '') + '>' +
           (s.busy ? 'Đang gửi yêu cầu…' : 'Gửi yêu cầu xin cấp quyền') +
@@ -10419,62 +10658,12 @@ function hubRequestPage_() {
       '</form>' +
     '</section>';
 
-    // Filter my requests
-    var myReqs = (d.myRequests || []).filter(function(r) {
-      if (!s.searchMyReq) return true;
-      var q = s.searchMyReq.toLowerCase();
-      return r.hubName.toLowerCase().includes(q) || r.hubCode.toLowerCase().includes(q) || r.roleName.toLowerCase().includes(q) || r.requestId.toLowerCase().includes(q);
-    });
-
-    var myReqsHtml = '<section class="hr-panel">' +
-      '<div class="hr-panel-title">' +
-        '<span>Yêu cầu của tôi</span>' +
-        '<span style="font-size:12px;font-weight:600;color:var(--ag-muted);">' + myReqs.length + ' yêu cầu</span>' +
-      '</div>' +
-      '<p class="hr-panel-desc">Theo dõi tiến độ phê duyệt các yêu cầu xin cấp quyền Hub mà bạn đã gửi.</p>' +
-      '<div style="margin-bottom:12px;">' +
-        '<input type="search" id="hrMyReqSearch" value="' + e(s.searchMyReq) + '" placeholder="Tìm theo tên Hub, mã Hub, role..." style="width:100%;box-sizing:border-box;padding:8px 12px;border:1px solid #cbd5e1;border-radius:6px;font-size:12.5px;">' +
-      '</div>' +
-      (!myReqs.length
-        ? '<div class="hr-empty"><div class="hr-empty-icon">📭</div>Bạn chưa gửi yêu cầu xin cấp quyền nào.</div>'
-        : '<div class="hr-table-container"><table class="hr-table">' +
-            '<thead>' +
-              '<tr>' +
-                '<th>Hub</th>' +
-                '<th>Tên quyền</th>' +
-                '<th>KPI</th>' +
-                '<th>Trạng thái</th>' +
-                '<th>Thời gian</th>' +
-                '<th>Thao tác</th>' +
-              '</tr>' +
-            '</thead>' +
-            '<tbody>' +
-              myReqs.map(function(r) {
-                var canCancel = r.status === 'PENDING';
-                var statusDetail = '';
-                if (r.status === 'APPROVED' && r.reviewedBy) statusDetail = '<small style="display:block;color:#16a34a;font-size:10px;">Duyệt: ' + e(r.reviewedBy) + '</small>';
-                if (r.status === 'REJECTED' && r.rejectionReason) statusDetail = '<small style="display:block;color:#dc2626;font-size:10px;">' + e(r.rejectionReason) + '</small>';
-                return '<tr>' +
-                  '<td><b>' + e(r.hubName) + '</b><small style="display:block;color:#64748b;font-size:11px;">' + e(r.hubCode) + '</small></td>' +
-                  '<td><span class="hr-role-badge">' + e(r.roleName) + '</span></td>' +
-                  '<td>' + hubRequestKpiBadge_(r.includeKpi) + '</td>' +
-                  '<td>' + hubRequestStatusBadge_(r.status) + statusDetail + '</td>' +
-                  '<td><small>' + hubRequestFormatDate_(r.createdAt) + '</small></td>' +
-                  '<td>' +
-                    (canCancel
-                      ? '<button class="hr-btn-cancel" data-hr-cancel="' + e(r.requestId) + '">Huỷ</button>'
-                      : '<span style="color:#94a3b8;font-size:11px;">—</span>') +
-                  '</td>' +
-                '</tr>';
-              }).join('') +
-            '</tbody>' +
-          '</table></div>') +
-    '</section>';
-
-    body = '<div class="hr-grid">' + formHtml + myReqsHtml + '</div>';
+    body = '<div class="hr-grid" style="grid-template-columns: minmax(0, 560px);">' + reqFormHtml + '</div>';
 
   } else if (s.activeTab === 'approval' && isAomOrAdmin) {
-    // --- TAB 2: DUYỆT YÊU CẦU (AOM & ADMIN) ---
+    // =========================================================================
+    // TAB: DUYỆT YÊU CẦU (AOM & ADMIN)
+    // =========================================================================
     var allApprovals = (d.pendingApprovals || []).concat(d.approvalHistory || []);
     var pendingList = d.pendingApprovals || [];
     var approvedList = (d.approvalHistory || []).filter(function(r) { return r.status === 'APPROVED'; });
@@ -10499,20 +10688,19 @@ function hubRequestPage_() {
       '</div>' +
     '</div>';
 
-    // Filter approvals
     var displayList = allApprovals.filter(function(r) {
       if (s.filterStatus !== 'ALL' && r.status !== s.filterStatus) return false;
-      if (s.hubFilter && r.hubCode !== s.hubFilter) return false;
+      if (s.hubApprovalFilter && r.hubCode !== s.hubApprovalFilter) return false;
       if (s.searchApproval) {
         var q = s.searchApproval.toLowerCase();
-        return r.email.toLowerCase().includes(q) || r.displayName.toLowerCase().includes(q) || r.hubName.toLowerCase().includes(q) || r.roleName.toLowerCase().includes(q);
+        return r.email.toLowerCase().includes(q) || (r.displayName || '').toLowerCase().includes(q) || r.hubName.toLowerCase().includes(q) || r.roleName.toLowerCase().includes(q);
       }
       return true;
     });
 
     var hubOptions = Array.from(new Set(allApprovals.map(function(r) { return r.hubCode + '||' + r.hubName; }))).sort().map(function(item) {
       var parts = item.split('||');
-      return '<option value="' + e(parts[0]) + '" ' + (s.hubFilter === parts[0] ? 'selected' : '') + '>' + e(parts[1]) + '</option>';
+      return '<option value="' + e(parts[0]) + '" ' + (s.hubApprovalFilter === parts[0] ? 'selected' : '') + '>' + e(parts[1]) + '</option>';
     });
 
     var filterBar = '<div class="hr-filter-bar">' +
@@ -10582,6 +10770,61 @@ function hubRequestPage_() {
         '</table></div>';
 
     body = stats + filterBar + tableHtml;
+
+  } else if (s.activeTab === 'my-requests') {
+    // =========================================================================
+    // TAB: TIẾN ĐỘ YÊU CẦU CỦA TÔI
+    // =========================================================================
+    var myReqs = (d.myRequests || []).filter(function(r) {
+      if (!s.searchMyReq) return true;
+      var q = s.searchMyReq.toLowerCase();
+      return r.hubName.toLowerCase().includes(q) || r.hubCode.toLowerCase().includes(q) || r.roleName.toLowerCase().includes(q) || r.requestId.toLowerCase().includes(q);
+    });
+
+    body = '<section class="hr-panel">' +
+      '<div class="hr-panel-title">' +
+        '<span>Yêu cầu của tôi</span>' +
+        '<span style="font-size:12px;font-weight:600;color:var(--ag-muted);">' + myReqs.length + ' yêu cầu</span>' +
+      '</div>' +
+      '<p class="hr-panel-desc">Theo dõi tiến độ phê duyệt các yêu cầu xin cấp quyền Hub mà bạn đã gửi.</p>' +
+      '<div style="margin-bottom:12px;">' +
+        '<input type="search" id="hrMyReqSearch" value="' + e(s.searchMyReq) + '" placeholder="Tìm theo tên Hub, mã Hub, role..." style="width:100%;box-sizing:border-box;padding:8px 12px;border:1px solid #cbd5e1;border-radius:6px;font-size:12.5px;">' +
+      '</div>' +
+      (!myReqs.length
+        ? '<div class="hr-empty"><div class="hr-empty-icon">📭</div>Bạn chưa gửi yêu cầu xin cấp quyền nào.</div>'
+        : '<div class="hr-table-container"><table class="hr-table">' +
+            '<thead>' +
+              '<tr>' +
+                '<th>Hub</th>' +
+                '<th>Tên quyền</th>' +
+                '<th>KPI</th>' +
+                '<th>Trạng thái</th>' +
+                '<th>Thời gian</th>' +
+                '<th>Thao tác</th>' +
+              '</tr>' +
+            '</thead>' +
+            '<tbody>' +
+              myReqs.map(function(r) {
+                var canCancel = r.status === 'PENDING';
+                var statusDetail = '';
+                if (r.status === 'APPROVED' && r.reviewedBy) statusDetail = '<small style="display:block;color:#16a34a;font-size:10px;">Duyệt: ' + e(r.reviewedBy) + '</small>';
+                if (r.status === 'REJECTED' && r.rejectionReason) statusDetail = '<small style="display:block;color:#dc2626;font-size:10px;">' + e(r.rejectionReason) + '</small>';
+                return '<tr>' +
+                  '<td><b>' + e(r.hubName) + '</b><small style="display:block;color:#64748b;font-size:11px;">' + e(r.hubCode) + '</small></td>' +
+                  '<td><span class="hr-role-badge">' + e(r.roleName) + '</span></td>' +
+                  '<td>' + hubRequestKpiBadge_(r.includeKpi) + '</td>' +
+                  '<td>' + hubRequestStatusBadge_(r.status) + statusDetail + '</td>' +
+                  '<td><small>' + hubRequestFormatDate_(r.createdAt) + '</small></td>' +
+                  '<td>' +
+                    (canCancel
+                      ? '<button class="hr-btn-cancel" data-hr-cancel="' + e(r.requestId) + '">Huỷ</button>'
+                      : '<span style="color:#94a3b8;font-size:11px;">—</span>') +
+                  '</td>' +
+                '</tr>';
+              }).join('') +
+            '</tbody>' +
+          '</table></div>') +
+    '</section>';
   }
 
   // Reject Modal
@@ -10630,28 +10873,70 @@ function hubRequestBind_() {
     };
   });
 
-  if (s.activeTab === 'request') {
-    // Form inputs
-    var hubSelect = document.getElementById('hrHubSelect');
-    if (hubSelect) hubSelect.onchange = function() {
-      s.form.hubCode = this.value;
-      render();
+  // 1. DIRECT GRANT BINDINGS (AOM)
+  if (s.activeTab === 'grant') {
+    var emailInput = document.getElementById('hrDirectEmail');
+    if (emailInput) emailInput.oninput = function() { s.directForm.targetEmail = this.value.trim(); };
+
+    var nameInput = document.getElementById('hrDirectName');
+    if (nameInput) nameInput.oninput = function() { s.directForm.displayName = this.value; };
+
+    var directHub = document.getElementById('hrDirectHub');
+    if (directHub) directHub.onchange = function() { s.directForm.hubCode = this.value; render(); };
+
+    var directRole = document.getElementById('hrDirectRole');
+    if (directRole) directRole.onchange = function() { s.directForm.roleName = this.value; render(); };
+
+    var directCustomRole = document.getElementById('hrDirectCustomRole');
+    if (directCustomRole) directCustomRole.oninput = function() { s.directForm.customRole = this.value; };
+
+    var directKpi = document.getElementById('hrDirectIncludeKpi');
+    if (directKpi) directKpi.onchange = function() {
+      s.directForm.includeKpi = this.checked;
+      var card = this.closest('.hr-kpi-card');
+      if (card) {
+        if (this.checked) card.classList.add('checked');
+        else card.classList.remove('checked');
+      }
     };
+
+    var directNote = document.getElementById('hrDirectNote');
+    if (directNote) directNote.oninput = function() { s.directForm.note = this.value; };
+
+    var directForm = document.getElementById('hrDirectForm');
+    if (directForm) directForm.onsubmit = function(ev) {
+      ev.preventDefault();
+      hubDirectGrantSubmit_();
+    };
+
+    var grantHubFilter = document.getElementById('hrGrantHubFilter');
+    if (grantHubFilter) grantHubFilter.onchange = function() { s.grantHubFilter = this.value; render(); };
+
+    var searchGrants = document.getElementById('hrSearchGrants');
+    if (searchGrants) searchGrants.oninput = function() { s.searchGrants = this.value; render(); };
+
+    // Revoke buttons
+    document.querySelectorAll('[data-hr-revoke-email]').forEach(function(btn) {
+      btn.onclick = function() {
+        hubDirectRevoke_(this.dataset.hrRevokeEmail, this.dataset.hrRevokeHub, this.dataset.hrRevokeName);
+      };
+    });
+  }
+
+  // 2. SELF-REQUEST BINDINGS
+  if (s.activeTab === 'request') {
+    var hubSelect = document.getElementById('hrHubSelect');
+    if (hubSelect) hubSelect.onchange = function() { s.requestForm.hubCode = this.value; render(); };
 
     var roleSelect = document.getElementById('hrRoleSelect');
-    if (roleSelect) roleSelect.onchange = function() {
-      s.form.roleName = this.value;
-      render();
-    };
+    if (roleSelect) roleSelect.onchange = function() { s.requestForm.roleName = this.value; render(); };
 
     var customRole = document.getElementById('hrCustomRole');
-    if (customRole) customRole.oninput = function() {
-      s.form.customRole = this.value;
-    };
+    if (customRole) customRole.oninput = function() { s.requestForm.customRole = this.value; };
 
     var kpiCheck = document.getElementById('hrIncludeKpi');
     if (kpiCheck) kpiCheck.onchange = function() {
-      s.form.includeKpi = this.checked;
+      s.requestForm.includeKpi = this.checked;
       var card = this.closest('.hr-kpi-card');
       if (card) {
         if (this.checked) card.classList.add('checked');
@@ -10660,53 +10945,28 @@ function hubRequestBind_() {
     };
 
     var noteInput = document.getElementById('hrNote');
-    if (noteInput) noteInput.oninput = function() {
-      s.form.note = this.value;
-    };
+    if (noteInput) noteInput.oninput = function() { s.requestForm.note = this.value; };
 
     var form = document.getElementById('hrRequestForm');
     if (form) form.onsubmit = function(ev) {
       ev.preventDefault();
       hubRequestSubmit_();
     };
+  }
 
-    var myReqSearch = document.getElementById('hrMyReqSearch');
-    if (myReqSearch) myReqSearch.oninput = function() {
-      s.searchMyReq = this.value;
-      render();
-    };
-
-    document.querySelectorAll('[data-hr-cancel]').forEach(function(btn) {
-      btn.onclick = function() {
-        hubRequestCancel_(this.dataset.hrCancel);
-      };
-    });
-
-  } else if (s.activeTab === 'approval') {
-    // Approval toolbar
+  // 3. APPROVAL BINDINGS
+  if (s.activeTab === 'approval') {
     var statusFilter = document.getElementById('hrApprovalStatusFilter');
-    if (statusFilter) statusFilter.onchange = function() {
-      s.filterStatus = this.value;
-      render();
-    };
+    if (statusFilter) statusFilter.onchange = function() { s.filterStatus = this.value; render(); };
 
     var hubFilter = document.getElementById('hrApprovalHubFilter');
-    if (hubFilter) hubFilter.onchange = function() {
-      s.hubFilter = this.value;
-      render();
-    };
+    if (hubFilter) hubFilter.onchange = function() { s.hubApprovalFilter = this.value; render(); };
 
     var searchInput = document.getElementById('hrApprovalSearch');
-    if (searchInput) searchInput.oninput = function() {
-      s.searchApproval = this.value;
-      render();
-    };
+    if (searchInput) searchInput.oninput = function() { s.searchApproval = this.value; render(); };
 
-    // Action buttons
     document.querySelectorAll('[data-hr-approve]').forEach(function(btn) {
-      btn.onclick = function() {
-        hubRequestApprove_(this.dataset.hrApprove);
-      };
+      btn.onclick = function() { hubRequestApprove_(this.dataset.hrApprove); };
     });
 
     document.querySelectorAll('[data-hr-reject]').forEach(function(btn) {
@@ -10723,27 +10983,31 @@ function hubRequestBind_() {
       };
     });
 
-    // Modal bindings
-    var modalOverlay = document.getElementById('hrModalOverlay');
     var modalClose = document.getElementById('hrModalClose');
     var modalCancel = document.getElementById('hrModalCancelBtn');
     var modalConfirm = document.getElementById('hrModalConfirmBtn');
     var reasonInput = document.getElementById('hrRejectReasonInput');
 
-    if (reasonInput) reasonInput.oninput = function() {
-      s.rejectModal.reason = this.value;
-    };
+    if (reasonInput) reasonInput.oninput = function() { s.rejectModal.reason = this.value; };
 
     [modalClose, modalCancel].forEach(function(el) {
-      if (el) el.onclick = function() {
-        s.rejectModal.show = false;
-        render();
-      };
+      if (el) el.onclick = function() { s.rejectModal.show = false; render(); };
     });
 
     if (modalConfirm) modalConfirm.onclick = hubRequestConfirmReject_;
   }
+
+  // 4. MY REQUESTS BINDINGS
+  if (s.activeTab === 'my-requests') {
+    var myReqSearch = document.getElementById('hrMyReqSearch');
+    if (myReqSearch) myReqSearch.oninput = function() { s.searchMyReq = this.value; render(); };
+
+    document.querySelectorAll('[data-hr-cancel]').forEach(function(btn) {
+      btn.onclick = function() { hubRequestCancel_(this.dataset.hrCancel); };
+    });
+  }
 }
+
     })();
     </script>
     

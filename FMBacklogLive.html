@@ -1,0 +1,61 @@
+<style>
+.fmt-live-source{display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap;margin-bottom:16px;padding:12px 16px;border:1px solid var(--ops-line,#dce4ed);border-radius:8px;background:var(--ops-paper,#fff);color:var(--ops-ink,#203950);font-size:12px;line-height:1.6}
+.fmt-live-source p{margin:2px 0 0;color:var(--ops-muted,#53677b)}
+.fmt-live-source a{color:var(--ops-blue,#31658c);text-underline-offset:3px}
+.fmt-live-source button{min-height:44px;padding:8px 12px;border:1px solid var(--ops-line,#dce4ed);border-radius:6px;background:var(--ops-paper,#fff);color:var(--ops-blue,#31658c);font:inherit;cursor:pointer}
+.fmt-live-source button:disabled{cursor:wait}
+.fmt-live-source.is-error{border-color:var(--ops-red,#ad3743)}
+.fmt-live-source.is-error p{color:var(--ops-red,#ad3743)}
+.fmt-live-loading{padding:32px 20px;border:1px solid var(--ops-line,#dce4ed);border-radius:8px;background:var(--ops-paper,#fff);color:var(--ops-muted,#53677b);font-size:13px}
+</style>
+<script>
+(function(){
+  'use strict';
+  var active=null;
+  window.FM_BACKLOG_DATA=null;
+  function esc(value){return String(value==null?'':value).replace(/[&<>"']/g,function(c){return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]})}
+  function clock(value){return value?new Date(value).toLocaleString('en-GB',{timeZone:'Asia/Ho_Chi_Minh',hour12:false}):'Not checked'}
+  window.stopFmPendingLive_=function(){if(active)active.stop()};
+  window.fmPendingLiveRequestKey_=function(){return active?active.key:''};
+  window.refreshFmPendingLive_=function(){if(active)active.load(true)};
+  window.mountFmPendingLive_=function(container,view,request){
+    if(active)active.stop();
+    window.FM_BACKLOG_DATA=null;
+    var key=JSON.stringify(request),data=null,revision='',checkedAt='',error='',loading=false,stopped=false,timer,timeout,sequence=0,queuedForce=false;
+    container.innerHTML='<section class="fmt-live-source" aria-label="Pending pickup data source"><div><strong>FM. Pending Pickup · <a href="https://docs.google.com/spreadsheets/d/1q-GyZsksjnYLA9kZ6m9rjwnLMT3VMSBoaL_DkLrR5Qo/edit?gid=344409718#gid=344409718" target="_blank" rel="noopener noreferrer">2_Visual</a> / <a href="https://docs.google.com/spreadsheets/d/1q-GyZsksjnYLA9kZ6m9rjwnLMT3VMSBoaL_DkLrR5Qo/edit?gid=1233387831#gid=1233387831" target="_blank" rel="noopener noreferrer">3_Deck_HCM</a></strong><p class="fmt-live-status" role="status" aria-live="polite"></p></div><button type="button" class="fmt-live-refresh">Refresh from Sheet</button></section><div class="fmt-live-body"><div class="fmt-live-loading" role="status">Loading the latest HUB aggregates…</div></div>';
+    var source=container.querySelector('.fmt-live-source'),status=container.querySelector('.fmt-live-status'),refresh=container.querySelector('.fmt-live-refresh'),body=container.querySelector('.fmt-live-body');
+    function paint(){
+      source.classList.toggle('is-error',!!error);refresh.disabled=loading;refresh.setAttribute('aria-busy',String(loading));
+      var local=data&&data.source.mode==='csv-fixture';
+      status.textContent=error?(data?'Sync failed. Showing last loaded data. ':'Could not load Sheet. ')+error:loading?(data?'Checking for changes…':'Connecting to the data source…'):local?'LOCAL CSV samples · '+data.hubDetails.length+' HUBs. Live Google Sheets runs in Apps Script after deployment.':'Google Sheets · '+(data?data.hubDetails.length:0)+' HUBs · Checked '+clock(checkedAt)+' · Auto-refresh every 60s while visible';
+      if(error&&!data)body.innerHTML='<div class="fmt-live-loading">No data loaded. Check access to the source file and use Refresh from Sheet to retry.</div>';
+    }
+    function schedule(){clearTimeout(timer);if(!stopped)timer=setTimeout(function(){if(!container.isConnected){stop();return}if(document.visibilityState==='hidden'){schedule();return}load(false)},60000)}
+    function stop(){stopped=true;sequence++;clearTimeout(timer);clearTimeout(timeout);document.removeEventListener('visibilitychange',visible);if(body._fmtDispose)body._fmtDispose();if(active&&active.key===key)active=null}
+    function visible(){if(!container.isConnected){stop();return}if(document.visibilityState!=='hidden'&&(!checkedAt||Date.now()-Date.parse(checkedAt)>=60000))load(false)}
+    function finish(){loading=false;clearTimeout(timeout);paint();if(queuedForce){queuedForce=false;load(true)}else schedule()}
+    function load(force){
+      if(stopped||!container.isConnected)return;
+      if(loading){queuedForce=queuedForce||force;return}
+      loading=true;error='';clearTimeout(timer);paint();var seq=++sequence;
+      function failure(err){
+        if(stopped||seq!==sequence)return;error=err&&err.message||String(err);
+        if(/(?:MODULE_ACCESS_DENIED|HUB_ACCESS_DENIED|SCOPE_DENIED|SCOPE_VALUE_DENIED|ACCESS_DENIED|AUTH_REQUIRED)/.test(error)){if(body._fmtDispose)body._fmtDispose();data=null;revision='';window.FM_BACKLOG_DATA=null}
+        finish();
+      }
+      timeout=setTimeout(function(){if(stopped||seq!==sequence)return;sequence++;error='The source took too long to respond. Please retry.';finish()},40000);
+      if(!(window.google&&google.script&&google.script.run)){failure(Error('Apps Script connection is unavailable.'));return}
+      var payload=Object.assign({},request,{forceRefresh:force===true,ifRevision:revision});
+      google.script.run.withSuccessHandler(function(result){
+        if(stopped||seq!==sequence)return;
+        if(!result||!result.source||typeof result.revision!=='string'||(result.unchanged&&!data)||(!result.unchanged&&!Array.isArray(result.hubDetails))){failure(Error('Invalid source response.'));return}
+        checkedAt=result.checkedAt;
+        if(result.unchanged){if(data)data.source=result.source}
+        else if(result.revision!==revision){data=result;revision=result.revision;window.FM_BACKLOG_DATA=data;if(body._fmtRefresh)body._fmtRefresh();else if(view==='validation')window.renderFmValidationDetailView_(body);else window.renderFmPendingTrackerView_(body)}
+        finish();
+      }).withFailureHandler(failure).getFmPendingSnapshot(payload);
+    }
+    active={key:key,load:load,stop:stop};refresh.onclick=function(){load(true)};document.addEventListener('visibilitychange',visible);load(false);
+  };
+})();
+</script>

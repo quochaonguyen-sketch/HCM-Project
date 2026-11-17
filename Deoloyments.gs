@@ -395,8 +395,10 @@ function kpiDailyDirectRowToObject_(row) {
     fmOntime: row[8],
     lmOntime: row[9],
     deliSuccess: row[10],
-    sorterProductivityPct: row[11],
-    riderProductivityPct: row[12],
+    sorterProductivityPct: row[11] == null ? null : Math.max(0, Math.min(Number(row[11]), 120)),
+    sorterProductivityRawPct: row[11] == null ? null : Number(row[11]),
+    riderProductivityPct: row[12] == null ? null : Math.max(0, Math.min(Number(row[12]), 120)),
+    riderProductivityRawPct: row[12] == null ? null : Number(row[12]),
     correctSopPu: row[13],
     totalVolume: row[14],
 
@@ -509,8 +511,10 @@ function buildKpiDailyDirectModel_() {
     const fm = pctCell(rv, dv, idx.fmOntime);
     const lm = pctCell(rv, dv, idx.lmOntime);
     const deli = pctCell(rv, dv, idx.deliSuccess);
-    const sorter = pctCell(rv, dv, idx.sorterProductivityPct);
-    const rider = pctCell(rv, dv, idx.riderProductivityPct);
+    const sorterRaw = pctCell(rv, dv, idx.sorterProductivityPct);
+    const riderRaw = pctCell(rv, dv, idx.riderProductivityPct);
+    const sorter = (sorterRaw != null && isFinite(sorterRaw)) ? Number(sorterRaw) : null;
+    const rider = (riderRaw != null && isFinite(riderRaw)) ? Number(riderRaw) : null;
     const sop = pctCell(rv, dv, idx.correctSopPu);
     const hubType = idx.hubType >= 0 ? textCell(rv, dv, idx.hubType) : '';
     const region = idx.region >= 0 ? textCell(rv, dv, idx.region) : '';
@@ -741,13 +745,21 @@ function getKpiDailyDirectDayList_(
             : null,
 
         sorterProductivityPct:
-          single
-            ? single.sorterProductivityPct
+          single && single.sorterProductivityPct != null
+            ? Math.min(Number(single.sorterProductivityPct), 120)
+            : null,
+        sorterProductivityRawPct:
+          single && single.sorterProductivityRawPct != null
+            ? Number(single.sorterProductivityRawPct)
             : null,
 
         riderProductivityPct:
-          single
-            ? single.riderProductivityPct
+          single && single.riderProductivityPct != null
+            ? Math.min(Number(single.riderProductivityPct), 120)
+            : null,
+        riderProductivityRawPct:
+          single && single.riderProductivityRawPct != null
+            ? Number(single.riderProductivityRawPct)
             : null,
 
         correctSopPu:

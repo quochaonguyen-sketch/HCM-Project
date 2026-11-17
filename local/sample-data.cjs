@@ -106,9 +106,34 @@ function prepareData(data){
       ledger.push({sheet:name,row:table.length,kind:'mock_missing_dtc_hub',hubCode:hub[0]});
     }
   }
-  const fc=back.FC,fcNames=new Set(fc.slice(2).map(row=>key(row[0])));
+  const fc=back.FC||[],fcNames=new Set(fc.slice(2).map(row=>key(row[0])));
   for(const hub of permissions)if(!fcNames.has(key(hub[1]))){fc.push([hub[1]]);ledger.push({sheet:'FC',row:fc.length,kind:'mock_missing_forecast_hub',hubCode:hub[0]});}
   fc.slice(2).forEach((row,ri)=>{for(let ci=1;ci<fc[1].length;ci++)if(/Forecast/i.test(String(fc[1][ci]))&&(row[ci]==null||row[ci]==='')){row[ci]=Math.round(1400+seed(row[0]+'fc'+ci)*4500);ledger.push({sheet:'FC',row:ri+3,column:ci+1,kind:'mock_missing_cell'});}});
+
+  // Replicate monthly FC structure (FC T10/26 & FC T11/26) matching operations
+  back['FC T10/26']=fc.map(r=>r.slice());
+  front['FC T10/26']=back['FC T10/26'];
+
+  const novRow0=['Hub Name'],novRow1=[''];
+  for(let d=30;d>=1;d--){
+    const dayStr='2026-11-'+String(d).padStart(2,'0');
+    novRow0.push(dayStr,'');
+    novRow1.push('#FM Forecast','#LM Forecast');
+  }
+  const fcNov=[novRow0,novRow1];
+  permissions.forEach(hub=>{
+    const hName=hub[1];
+    const row=[hName];
+    for(let d=30;d>=1;d--){
+      const fm=Math.round(1600+seed(hub[0]+'novfm'+d)*3200);
+      const lm=Math.round(1800+seed(hub[0]+'novlm'+d)*3600);
+      row.push(fm,lm);
+    }
+    fcNov.push(row);
+  });
+  back['FC T11/26']=fcNov;
+  front['FC T11/26']=fcNov;
+  ledger.push({sheet:'FC T11/26',kind:'mock_monthly_fc',rows:fcNov.length-2});
   const provenance={mode:'LOCAL_XLSX_AND_MOCK',importedAt:new Date().toISOString(),asOf:anchor,
     files:Object.values(data).map(b=>b.name),hubs:permissions.length,
     mockCellsAndRows:ledger.length,mockSources:['Missing KPI cells and current-month HUB/day rows','Missing D0, attendance, DTC and FC coverage','BigQuery FLM volume, claims and lost adapters'],

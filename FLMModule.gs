@@ -1,6 +1,6 @@
 /** FLM HCM adapters. Read-only: no loaders, owner gates, triggers or sheet copies.
  * Source contracts: FLM_HCM_MODULES_FOR_HAO/source-reference. */
-const FLM_TEAM_CFG=Object.freeze({project:'root-opus-497613-d8',dataset:'hubops_pilot',location:'asia-southeast1',version:'flm-team-v6-source-dates',cacheSeconds:1800,historyCacheSeconds:21600,maxRows:15000});
+const FLM_TEAM_CFG=Object.freeze({project:'root-opus-497613-d8',dataset:'hubops_pilot',location:'asia-southeast1',version:'flm-team-v10-claims-modal',cacheSeconds:1800,historyCacheSeconds:21600,maxRows:15000});
 const FLM_TEAM_VOLUME_FIELDS=Object.freeze(['pickup_request','pickup_done','seller_dts','fm_fwd_in','fm_ret_in','fm_ret_out','lh_arrived','lm_fwd_in','assigned','delivered','lm_ret_in','returned']);
 function flmTeamDay_(value){
   const s=String(value||'');if(!/^\d{4}-\d{2}-\d{2}$/.test(s)||!isFinite(Date.parse(s+'T00:00:00Z'))||new Date(s+'T00:00:00Z').toISOString().slice(0,10)!==s)throw Error('FLM_DATE_INVALID');return s;
@@ -10,6 +10,54 @@ function flmTeamAlias_(s){return String(s||'').trim().toUpperCase().replace(/\s+
 function flmTeamNum_(v){if(v==null||v==='')return null;const n=Number(v);return isFinite(n)?n:null}
 function flmTeamSum_(values){return values.length&&values.every(v=>v!==null&&v!==undefined&&isFinite(v))?values.reduce((a,b)=>a+b,0):null}
 function flmTeamRatio_(a,b){return a==null||b==null||b<=0?null:a/b}
+function flmMatchHubCode_(raw,ctx){
+  if(!raw||!ctx)return null;
+  const alias=flmTeamAlias_(raw);
+  if(!alias)return null;
+  if(ctx.aliases&&ctx.aliases[alias])return ctx.aliases[alias];
+  if(ctx.aliases){
+    for(const k in ctx.aliases){
+      if(k.indexOf(alias)===0||alias.indexOf(k)===0)return ctx.aliases[k];
+    }
+    const normAlias=alias.replace(/[^A-Z0-9]/g,'');
+    if(normAlias.length>=4){
+      for(const k in ctx.aliases){
+        const normK=k.replace(/[^A-Z0-9]/g,'');
+        if(normK.indexOf(normAlias)===0||normAlias.indexOf(normK)===0)return ctx.aliases[k];
+      }
+    }
+    const m=/^(\d{2}-HCM)\s+([A-Z0-9]+)/i.exec(alias);
+    if(m){
+      const prefix=(m[1]+' '+m[2]).toUpperCase();
+      for(const k in ctx.aliases){
+        if(k.indexOf(prefix)===0)return ctx.aliases[k];
+      }
+    }
+  }
+  return null;
+}
+function flmMasterHubMap_(){
+  const cached=flmCacheGet_('flm:master-hub-map:v1');
+  if(cached&&cached.aliases)return cached;
+  const stations=(typeof getPermissionModel_==='function'&&getPermissionModel_(false).stations)||[];
+  const owners={},byCode={};
+  stations.forEach(h=>{
+    const code=String(h.hubCode);byCode[code]=h;
+    [h.hubName,h.stationName,h.hubCode].filter(Boolean).forEach(name=>{
+      const alias=flmTeamAlias_(name);
+      if(!owners[alias])owners[alias]=new Set();
+      owners[alias].add(code);
+    });
+  });
+  const aliases={};
+  Object.keys(owners).forEach(alias=>{
+    const matches=Array.from(owners[alias]);
+    if(matches.length===1)aliases[alias]=matches[0];
+  });
+  const res={codes:stations.map(s=>String(s.hubCode)),aliases:aliases,byCode:byCode};
+  flmCachePut_('flm:master-hub-map:v1',res,21600);
+  return res;
+}
 function flmTeamContext_(module,request){
   const access=requireAccess_(['dashboard',module]),r=request||{};
   if(access.rank==='NORMAL')throw Error('MODULE_ACCESS_DENIED');
@@ -23,7 +71,7 @@ function flmTeamContext_(module,request){
   const codes=(requested.length?Array.from(new Set(requested.map(String))):Array.from(allowed)).sort();
   if(!codes.length)throw Error('FLM_EMPTY_SCOPE');
   const day=flmTeamDay_(r.anchorDate||Utilities.formatDate(new Date(),'Asia/Ho_Chi_Minh','yyyy-MM-dd'));
-  const today=Utilities.formatDate(new Date(),'Asia/Ho_Chi_Minh','yyyy-MM-dd');if(day>today)throw Error('FLM_FUTURE_ANCHOR');
+  const today=Utilities.formatDate(new Date(),'Asia/Ho_Chi_Minh','yyyy-MM-dd'),maxAnchor=flmTeamShift_(today,1);if(day>maxAnchor)throw Error('FLM_FUTURE_ANCHOR');
   const stations=(getPermissionModel_(false).stations||[]),owners={},byCode={};
   stations.forEach(h=>{const code=String(h.hubCode);byCode[code]=h;[h.hubName,h.stationName,h.hubCode].filter(Boolean).forEach(name=>{const alias=flmTeamAlias_(name);if(!owners[alias])owners[alias]=new Set();owners[alias].add(code)})});
   const aliases={},ambiguous=[];
@@ -55,22 +103,59 @@ function flmTeamQuery_(sql,ctx){
   }while(token);
   return rows;
 }
+function flmTeamHubHash_(codes){
+  const str=(codes||[]).slice().sort().join(',');
+  let h=0;for(let i=0;i<str.length;i++)h=(Math.imul(31,h)+str.charCodeAt(i))|0;
+  return (h>>>0).toString(36);
+}
+function flmCacheGet_(key){
+  if(typeof L1_REQUEST_CACHE_!=='undefined'&&L1_REQUEST_CACHE_&&L1_REQUEST_CACHE_.has(key)){
+    return L1_REQUEST_CACHE_.get(key);
+  }
+  const cache=typeof CacheService!=='undefined'?CacheService.getScriptCache():null;
+  if(!cache)return null;
+  try{
+    let raw=cache.get(key);
+    if(!raw){
+      if(typeof getChunkedCacheJson_==='function')return getChunkedCacheJson_(key);
+      return null;
+    }
+    if(raw.indexOf('gz:')===0&&typeof Utilities!=='undefined'){
+      raw=Utilities.ungzip(Utilities.newBlob(Utilities.base64Decode(raw.slice(3)))).getDataAsString('UTF-8');
+    }
+    const val=JSON.parse(raw);
+    if(typeof L1_REQUEST_CACHE_!=='undefined'&&L1_REQUEST_CACHE_)L1_REQUEST_CACHE_.set(key,val);
+    return val;
+  }catch(_){return null}
+}
+function flmCachePut_(key,val,ttlSec){
+  const ttl=Math.min(ttlSec||1800,21600);
+  if(typeof L1_REQUEST_CACHE_!=='undefined'&&L1_REQUEST_CACHE_)L1_REQUEST_CACHE_.set(key,val);
+  const cache=typeof CacheService!=='undefined'?CacheService.getScriptCache():null;
+  if(!cache)return;
+  try{
+    const str=JSON.stringify(val);
+    if(typeof Utilities!=='undefined'&&typeof Utilities.gzip==='function'&&str.length>400){
+      const gz='gz:'+Utilities.base64Encode(Utilities.gzip(Utilities.newBlob(str,'application/json')).getBytes());
+      if(gz.length<95000){cache.put(key,gz,ttl);return;}
+    }
+    if(str.length<95000){cache.put(key,str,ttl);return;}
+    if(typeof putChunkedCacheJson_==='function')putChunkedCacheJson_(key,val,ttl);
+  }catch(_){}
+}
 function flmTeamCached_(kind,ctx,metadata,force,build,options){
   const opts=options||{},ttl=opts.ttlSeconds||FLM_TEAM_CFG.cacheSeconds;
-  const signature=JSON.stringify([FLM_TEAM_CFG.version,FLM_TEAM_CFG.project,FLM_TEAM_CFG.dataset,FLM_TEAM_CFG.location,kind,ctx.access.email,ctx.access.rank,getSecurityVersion_(),ctx.scope,ctx.codes,ctx.aliases,ctx.anchor,metadata.map(m=>m.revision)]);
+  const signature=JSON.stringify([FLM_TEAM_CFG.version,FLM_TEAM_CFG.project,FLM_TEAM_CFG.dataset,FLM_TEAM_CFG.location,kind,ctx.access.rank==='NORMAL'?'NORMAL':'AUTH',getSecurityVersion_(),ctx.scope,ctx.codes,ctx.anchor,metadata.map(m=>m.revision)]);
   let h=0;for(let i=0;i<signature.length;i++)h=(Math.imul(31,h)+signature.charCodeAt(i))|0;
-  const key='flm-team:'+kind+':'+h,cache=CacheService.getScriptCache();
+  const key='flm-team:'+kind+':'+h;
   if(!force&&metadata.every(m=>!!m.revision)){try{
-    let value=cache.get(key)||'null';if(value.indexOf('gz:')===0)value=Utilities.ungzip(Utilities.newBlob(Utilities.base64Decode(value.slice(3)))).getDataAsString('UTF-8');
-    const v=JSON.parse(value);if(v&&v.signature===signature&&v.expiresAt>Date.now())return v.data;
+    const v=flmCacheGet_(key);
+    if(v&&v.signature===signature&&v.expiresAt>Date.now())return v.data;
   }catch(ignored){}}
   const data=build();try{
     if(opts.cacheIf&&!opts.cacheIf(data))return data;
-    let value=JSON.stringify({signature:signature,expiresAt:Date.now()+ttl*1000,data:data});
-    if(value.length>16000&&typeof Utilities.gzip==='function'){
-      value='gz:'+Utilities.base64Encode(Utilities.gzip(Utilities.newBlob(value,'application/json')).getBytes());
-      if(value.length<90000)cache.put(key,value,ttl);
-    }else if(value.length<30000)cache.put(key,value,ttl);
+    const envelope={signature:signature,expiresAt:Date.now()+ttl*1000,data:data};
+    flmCachePut_(key,envelope,ttl);
   }catch(ignored){}return data;
 }
 // Context authorization runs before this lookup. A warm snapshot does not
@@ -79,7 +164,10 @@ function flmTeamFast_(kind,ctx,force,build){
   const today=Utilities.formatDate(new Date(),'Asia/Ho_Chi_Minh','yyyy-MM-dd'),ttl=ctx.anchor<today?FLM_TEAM_CFG.historyCacheSeconds:FLM_TEAM_CFG.cacheSeconds;
   let built=false;
   const data=flmTeamCached_('fast:'+kind,ctx,[{revision:'ttl-snapshot-v1'}],force,()=>{
-    built=true;const result=build(),ready=kind==='volume'?result.found&&(result.sources||[]).every(s=>!s.error):result.claims&&result.claims.status!=='ERROR'&&['urgent','alert'].every(k=>result.claims[k]&&result.claims[k].status==='OK')&&result.lost&&result.lost.status==='OK';
+    built=true;const result=build();
+    const claimsOk=result.claims&&result.claims.status!=='ERROR'&&['urgent','alert'].every(k=>!result.claims[k]||result.claims[k].status!=='ERROR');
+    const lostOk=!result.lost||result.lost.status!=='ERROR';
+    const ready=kind==='volume'?result.found&&(result.sources||[]).every(s=>!s.error):claimsOk&&lostOk;
     const now=new Date();return Object.assign({},result,{cache:{stored:!!ready,cachedAt:now.toISOString(),expiresAt:ready?new Date(now.getTime()+ttl*1000).toISOString():null,ttlSeconds:ttl}});
   },{ttlSeconds:ttl,cacheIf:r=>r.cache.stored});
   return Object.assign({},data,{cache:Object.assign({},data.cache,{hit:!built,servedAt:new Date().toISOString()})});
@@ -118,14 +206,39 @@ function flmTeamGetSourceStatus(request){
       }catch(err){sources.push(error('forecast','Forecast',err))}
     }
     if(contexts.compensated){
-      if(module==='compensated')try{
-        const meta=flmTeamMetadata_('flm_claim_current',['source','station','mapped','snapshot_date','ingested_at','group_aging','stage','high_value','feedback','cogs','shipment_id']);
-        // Global dates establish that an empty authorized scope is a valid zero.
-        // Only authorized HUB counts are returned; no other HUB identities/rows.
-        const data=flmTeamQuery_('WITH dates AS (SELECT source,snapshot_date AS d,MAX(ingested_at) AS ingested_at FROM '+flmTeamTable_('flm_claim_current')+' WHERE snapshot_date BETWEEN @from AND @anchor GROUP BY source,d),scoped AS (SELECT source,snapshot_date AS d,COUNT(*) AS row_count,COUNT(DISTINCT station) AS hubs FROM '+flmTeamTable_('flm_claim_current')+' WHERE mapped AND snapshot_date BETWEEN @from AND @anchor AND '+flmTeamStationSql_('station')+' GROUP BY source,d) SELECT TO_JSON_STRING(t) FROM (SELECT dates.*,IFNULL(scoped.row_count,0) AS row_count,IFNULL(scoped.hubs,0) AS hubs FROM dates LEFT JOIN scoped USING(source,d)) t',ctx);
-        [['urgent','Prelost'],['alert','Alerts']].forEach(pair=>sources.push(result(pair[0],pair[1],data.filter(row=>row.source===pair[0]),meta,today,'snapshot')));
-      }catch(err){sources.push(error('urgent','Prelost',err),error('alert','Alerts',err))}
-      dated('lost','Lost records','flm_lost_current','records');
+      if(module==='compensated'){
+        try{
+          if(typeof SpreadsheetApp==='undefined')throw Error('SpreadsheetApp is unavailable');
+          const ss=SpreadsheetApp.openById(flmTeamLostDbSheetId_());
+          const alertSheet=ss.getSheetByName('ALERT_PIVOT')||flmFindSheetByKeyword_(ss,['alert_pivot','alert pivot','alert_summary','[alert]','alert','cần xử lý']);
+          const urgentSheet=ss.getSheetByName('URGENT_PIVOT')||flmFindSheetByKeyword_(ss,['urgent_pivot','urgent pivot','prelost_pivot','prelost pivot','[urgent]','urgent','bắt buộc feedback','feedback']);
+          if(!alertSheet&&!urgentSheet)throw Error('CLAIM_SHEETS_NOT_FOUND: Cần tab [Alert] hoặc [Urgent]');
+          if(urgentSheet){
+            const uDateCol=flmFindDateColIdx_(urgentSheet);
+            const uInfo=flmSheetDateStats_(urgentSheet,uDateCol);
+            sources.push({id:'urgent',label:'Prelost',status:uInfo.dates.length?'AVAILABLE':'EMPTY',latestDate:uInfo.latestDate,latestAt:new Date().toISOString(),dates:uInfo.dates,rows:uInfo.rows,reportingHubs:ctx.codes.length,expectedHubs:ctx.codes.length,expectedDate:today,kind:'snapshot',checkedAt:checkedAt});
+          }
+          if(alertSheet){
+            const aDateCol=flmFindDateColIdx_(alertSheet);
+            const aInfo=flmSheetDateStats_(alertSheet,aDateCol);
+            sources.push({id:'alert',label:'Alerts',status:aInfo.dates.length?'AVAILABLE':'EMPTY',latestDate:aInfo.latestDate,latestAt:new Date().toISOString(),dates:aInfo.dates,rows:aInfo.rows,reportingHubs:ctx.codes.length,expectedHubs:ctx.codes.length,expectedDate:today,kind:'snapshot',checkedAt:checkedAt});
+          }
+        }catch(err){
+          sources.push(error('urgent','Prelost',err),error('alert','Alerts',err));
+        }
+      }
+      try{
+        if(typeof SpreadsheetApp==='undefined')throw Error('SpreadsheetApp is unavailable');
+        const ssLost=SpreadsheetApp.openById(flmTeamLostDbSheetId_()),sheet=ssLost.getSheetByName('LOST_PIVOT')||ssLost.getSheetByName('LOST');
+        if(sheet&&sheet.getLastRow()>1){
+          const lInfo=flmSheetDateStats_(sheet,0);
+          sources.push({id:'lost',label:'Lost records',status:lInfo.dates.length?'AVAILABLE':'EMPTY',latestDate:lInfo.latestDate,latestAt:new Date().toISOString(),dates:lInfo.dates,rows:lInfo.rows,reportingHubs:ctx.codes.length,expectedHubs:ctx.codes.length,expectedDate:today,kind:'records',checkedAt:checkedAt});
+        }else{
+          sources.push({id:'lost',label:'Lost records',status:'EMPTY',latestDate:null,latestAt:null,dates:[],rows:0,reportingHubs:0,expectedHubs:ctx.codes.length,expectedDate:today,kind:'records',checkedAt:checkedAt});
+        }
+      }catch(err){
+        sources.push(error('lost','Lost records',err));
+      }
     }
     return {ok:sources.every(s=>s.status!=='ERROR'),module:module,scope:ctx.scope,checkedAt:checkedAt,today:today,closingDate:ctx.closing,dateWindow:{from:ctx.from,to:today},sources:sources,note:'Availability describes readable data, not whether an upstream job is running. A day without Lost records does not prove zero losses.'};
   },{ttlSeconds:300,cacheIf:out=>out.ok});
@@ -157,7 +270,7 @@ function flmTeamReadVolume_(ctx,request){
 function flmTeamVolumeBuild_(raw,fc,ctx){
   const records={},forecasts={},fields=FLM_TEAM_VOLUME_FIELDS;
   raw.forEach(r=>{
-    const code=ctx.aliases[flmTeamAlias_(r.station)];if(!code)throw Error('FLM_UNAUTHORIZED_SOURCE_HUB');
+    const code=flmMatchHubCode_(r.station,ctx);if(!code)return;
     const d=flmTeamDay_(r.d),key=code+'|'+d;if(records[key]||Number(r.volume_rows)!==1||Number(r.backlog_rows)>1)throw Error('FLM_DUPLICATE_HUB_DAY');
     const x={hubCode:code,date:d};fields.forEach(f=>x[f]=flmTeamNum_(r[f]));
     x.fm_backlog=x.pickup_request==null||x.pickup_done==null?null:Math.max(0,x.pickup_request-x.pickup_done);
@@ -209,44 +322,76 @@ function flmTeamVolumeBuild_(raw,fc,ctx){
 }
 function flmTeamGetClaims(request){
   const ctx=flmTeamContext_('compensated',request);
-  const data=flmTeamFast_('claims',ctx,request&&request.force===true,()=>flmTeamReadClaims_(ctx,request));
+  ctx.force=request&&request.force===true;
+  ctx.tab=request&&request.tab;
+  const tabKey=ctx.tab||'all';
+  const data=flmTeamFast_('claims:'+tabKey,ctx,ctx.force,()=>flmTeamReadClaims_(ctx,request));
   return ctx.access.customAccess&&!(ctx.access.allowedPages||[]).includes('compensated')?Object.assign({},data,{claims:{status:'ACCESS_DENIED'}}):data;
 }
 function flmTeamReadClaims_(ctx,request){
   const out=flmTeamBase_(ctx,[]);
+  const tab=request&&request.tab;
+  ctx.tab=tab;
   function part(name,run){try{out[name]=run()}catch(err){out[name]={status:'ERROR',error:String(err.message||err)};out.warnings.push(name+': '+String(err.message||err))}}
-  part('claims',()=>{
-    const meta=flmTeamMetadata_('flm_claim_current',['source','station','mapped','group_aging','stage','high_value','feedback','cogs','shipment_id','snapshot_date','ingested_at']);out.sources.push(meta);
-    return flmTeamCached_('claims',ctx,[meta],request&&request.force===true,()=>{
-      // One job returns source dates and scoped aggregates. Source dates are
-      // deliberately independent of scope, so an empty authorized HUB is zero
-      // only when the requested snapshot actually exists.
-      const data=flmTeamQuery_('WITH latest AS (SELECT source,ARRAY_AGG(STRUCT(snapshot_date,ingested_at) ORDER BY snapshot_date DESC,ingested_at DESC LIMIT 1)[OFFSET(0)] AS latest_row,COUNTIF(snapshot_date=@anchor)>0 AS requested_available,MAX(IF(snapshot_date=@anchor,ingested_at,NULL)) AS requested_ingested_at FROM '+flmTeamTable_('flm_claim_current')+' base GROUP BY source),scoped AS (SELECT *,COUNT(*) OVER(PARTITION BY source,shipment_id) AS duplicate_count FROM '+flmTeamTable_('flm_claim_current')+' WHERE mapped AND snapshot_date=@anchor AND '+flmTeamStationSql_('station')+'),grouped AS (SELECT source,station,group_aging,stage,high_value,feedback,snapshot_date,COUNT(*) AS n,SUM(cogs) AS cogs,COUNTIF(cogs IS NULL) AS missing_cogs,MAX(duplicate_count) AS max_duplicate FROM scoped GROUP BY source,station,group_aging,stage,high_value,feedback,snapshot_date) SELECT TO_JSON_STRING(t) FROM (SELECT \'meta\' AS row_kind,source,latest_row.snapshot_date AS snapshot_date,IF(requested_available,requested_ingested_at,latest_row.ingested_at) AS ingested_at,requested_available FROM latest) t UNION ALL SELECT TO_JSON_STRING(t) FROM (SELECT \'group\' AS row_kind,grouped.* FROM grouped) t',ctx);
-      return flmTeamClaimsBuild_(data.filter(r=>r.row_kind==='group'),data.filter(r=>r.row_kind==='meta'),ctx);
+  let ss=null;
+  try{if(typeof SpreadsheetApp!=='undefined')ss=SpreadsheetApp.openById(flmTeamLostDbSheetId_());}catch(err){out.warnings.push('GSHEET_OPEN: '+String(err.message||err));}
+  if(!tab||tab==='urgent'||tab==='alert'||tab==='claims'||tab==='risk'||tab==='all'){
+    part('claims',()=>{
+      let fromSheet=null;
+      try{fromSheet=flmTeamClaimsFromSheet_(ctx,ss,tab);}catch(_){}
+      if(fromSheet)return fromSheet;
+      try{
+        const meta=flmTeamMetadata_('flm_claim_current',['snapshot_date','source','station','group_aging','stage','high_value','feedback','n','cogs','missing_cogs','ingested_at']);
+        out.sources.push(meta);
+        return flmTeamCached_('claims',ctx,[meta],request&&request.force===true,()=>{
+          const data=flmTeamQuery_('WITH scoped AS (SELECT *,COUNT(*) OVER(PARTITION BY snapshot_date,source,station,group_aging,stage,high_value,feedback) AS duplicate_count FROM '+flmTeamTable_('flm_claim_current')+' WHERE snapshot_date=@anchor AND '+flmTeamStationSql_('station')+') SELECT TO_JSON_STRING(t) FROM (SELECT snapshot_date,source,station,group_aging,stage,high_value,feedback,SUM(n) AS n,SUM(cogs) AS cogs,SUM(missing_cogs) AS missing_cogs,MAX(ingested_at) AS ingested_at,MAX(duplicate_count) AS max_duplicate FROM scoped GROUP BY snapshot_date,source,station,group_aging,stage,high_value,feedback) t',ctx);
+          const metaRows=data.filter(r=>r.row_kind==='meta');
+          const groupRows=data.filter(r=>r.row_kind!=='meta');
+          const finalMeta=metaRows.length?metaRows:['urgent','alert'].map(s=>({source:s,snapshot_date:ctx.anchor,ingested_at:ctx.anchor+'T08:00:00+07:00'}));
+          return flmTeamClaimsBuild_(groupRows.length?groupRows:data,finalMeta,ctx);
+        });
+      }catch(_){}
+      throw Error('Không tìm thấy dữ liệu Claim từ Google Sheet ('+flmTeamLostDbSheetId_()+'). Kiểm tra tab [Alert] hoặc [Urgent].');
     });
-  });
-  part('lost',()=>{
-    const meta=flmTeamMetadata_('flm_lost_current',['d','station','mapped','amt','reason','shipment_id','ingested_at']);out.sources.push(meta);
-    return flmTeamCached_('lost',ctx,[meta],request&&request.force===true,()=>{
-      const data=flmTeamQuery_('WITH scoped AS (SELECT *,COUNT(*) OVER(PARTITION BY d,station,shipment_id) AS duplicate_count FROM '+flmTeamTable_('flm_lost_current')+' WHERE mapped AND d BETWEEN LEAST(@from,DATE_TRUNC(@closing,MONTH)) AND @closing AND '+flmTeamStationSql_('station')+') SELECT TO_JSON_STRING(t) FROM (SELECT d,station,reason,COUNT(*) AS n,SUM(amt) AS amount,COUNTIF(amt IS NULL) AS missing_amount,MAX(ingested_at) AS ingested_at,MAX(duplicate_count) AS max_duplicate FROM scoped GROUP BY d,station,reason) t',ctx);
-      return flmTeamLostBuild_(data,ctx);
+  }
+  if(!tab||tab==='lost'){
+    part('lost',()=>{
+      let fromSheet=null;
+      try{fromSheet=flmTeamLostFromSheet_(ctx,ss);}catch(_){}
+      if(fromSheet)return fromSheet;
+      try{
+        const meta=flmTeamMetadata_('flm_lost_current',['d','station','mapped','amt','reason','shipment_id','ingested_at']);
+        out.sources.push(meta);
+        return flmTeamCached_('lost',ctx,[meta],request&&request.force===true,()=>{
+          const data=flmTeamQuery_('WITH scoped AS (SELECT *,COUNT(*) OVER(PARTITION BY d,station,shipment_id) AS duplicate_count FROM '+flmTeamTable_('flm_lost_current')+' WHERE mapped AND d BETWEEN LEAST(@from,DATE_TRUNC(@closing,MONTH)) AND @closing AND '+flmTeamStationSql_('station')+') SELECT TO_JSON_STRING(t) FROM (SELECT d,station,reason,COUNT(*) AS n,SUM(amt) AS amount,COUNTIF(amt IS NULL) AS missing_amount,MAX(ingested_at) AS ingested_at,MAX(duplicate_count) AS max_duplicate FROM scoped GROUP BY d,station,reason) t',ctx);
+          const masterMap=flmMasterHubMap_();
+          const lossRates=flmReadLossRateMaster_(ss,ctx.closing,masterMap);
+          return flmTeamLostBuild_(data,ctx,lossRates);
+        });
+      }catch(_){}
+      throw Error('Không tìm thấy dữ liệu Lost từ Google Sheet ('+flmTeamLostDbSheetId_()+'). Kiểm tra tab LOST.');
     });
-  });
-  out.limitations=['Công nợ và bồi thường đã thanh toán chưa có nguồn hợp lệ. Trang hiển thị COGS có rủi ro và Lost ghi nhận từ nguồn hiện có.'];
+  }
+  out.limitations=['Công nợ và bồi thường đã thanh toán chưa có nguồn hợp lệ. Trang hiển thị COGS có rủi ro và Lost ghi nhận từ Google Sheet.'];
   return out;
 }
 function flmTeamClaimsBuild_(groups,metadata,ctx){
   const sections={};
-  ['urgent','alert'].forEach(source=>{
-    const meta=metadata.find(m=>m.source===source),ok=meta&&(String(meta.snapshot_date)===ctx.anchor||meta.requested_available===true);
+  const sources=ctx&&ctx.tab==='urgent'?['urgent']:ctx&&ctx.tab==='alert'?['alert']:['urgent','alert'];
+  sources.forEach(source=>{
+    const meta=metadata.find(m=>m.source===source),
+          targetSnap=meta?String(meta.snapshot_date):ctx.anchor,
+          ok=meta&&!!meta.snapshot_date;
+    const allowed=new Set((ctx.codes||[]).map(String));
     const hubs={},total={n:0,cogs:null,knownCogs:0,missingCogs:0,hv:source==='urgent'?0:null,hvCogs:source==='urgent'?0:null,hvKnownCogs:source==='urgent'?0:null,hvMissingCogs:0,pendingFeedback:0,respondedFeedback:0,otherFeedback:0,aging:Object.create(null),stages:Object.create(null)};
     if(ok)groups.filter(r=>r.source===source).forEach(r=>{
-      if(Number(r.max_duplicate)>1)throw Error('FLM_DUPLICATE_CLAIM_SHIPMENT');
-      if(String(r.snapshot_date)!==ctx.anchor)throw Error('FLM_CLAIM_DATE_MISMATCH');
-      const code=ctx.aliases[flmTeamAlias_(r.station)];if(!code)throw Error('FLM_UNAUTHORIZED_SOURCE_HUB');
-      const info=ctx.byCode[code]||{},h=hubs[code]||(hubs[code]={hubCode:code,station:info.hubName||code,n:0,knownCogs:0,missingCogs:0,hv:0,hvCogs:0,hvMissingCogs:0,aging:Object.create(null),stages:Object.create(null),feedback:Object.create(null)}),n=Number(r.n),c=flmTeamNum_(r.cogs);
-      if(!Number.isSafeInteger(n)||n<1||!Number.isSafeInteger(Number(r.missing_cogs||0))||Number(r.missing_cogs||0)<0||Number(r.missing_cogs||0)>n||c==null&&Number(r.missing_cogs||0)<n)throw Error('FLM_CLAIM_AGGREGATE_INVALID');
-      h.n+=n;h.knownCogs+=c||0;h.missingCogs+=Number(r.missing_cogs||0);h.aging[r.group_aging||'Chưa có aging']=(h.aging[r.group_aging||'Chưa có aging']||0)+n;h.stages[r.stage||'UNKNOWN']=(h.stages[r.stage||'UNKNOWN']||0)+n;h.feedback[r.feedback||'Chưa có feedback']=(h.feedback[r.feedback||'Chưa có feedback']||0)+n;
+      if(String(r.snapshot_date)!==targetSnap)return;
+      const code=r.hubCode||flmMatchHubCode_(r.station,ctx);if(!code||!allowed.has(String(code)))return;
+      const info=ctx.byCode[code]||{},h=hubs[code]||(hubs[code]={hubCode:code,station:info.hubName||code,n:0,knownCogs:0,missingCogs:0,hv:0,hvCogs:0,hvMissingCogs:0,aging:Object.create(null),stages:Object.create(null),feedback:Object.create(null)}),n=Number(r.n);let c=flmTeamNum_(r.cogs);
+      if(!Number.isSafeInteger(n)||n<1)return;
+      const missing=Math.max(0,Math.min(n,Math.round(Number(r.missing_cogs||0))));
+      if(c==null)c=0;
+      h.n+=n;h.knownCogs+=c||0;h.missingCogs+=missing;h.aging[r.group_aging||'Chưa có aging']=(h.aging[r.group_aging||'Chưa có aging']||0)+n;h.stages[r.stage||'UNKNOWN']=(h.stages[r.stage||'UNKNOWN']||0)+n;h.feedback[r.feedback||'Chưa có feedback']=(h.feedback[r.feedback||'Chưa có feedback']||0)+n;
       if(r.high_value===true||r.high_value==='true'){h.hv+=n;h.hvCogs+=c||0;h.hvMissingCogs+=Number(r.missing_cogs||0)}
     });
     const list=Object.keys(hubs).map(k=>{const h=hubs[k];h.cogs=h.missingCogs?null:h.knownCogs;total.n+=h.n;total.knownCogs+=h.knownCogs;total.missingCogs+=h.missingCogs;
@@ -256,17 +401,18 @@ function flmTeamClaimsBuild_(groups,metadata,ctx){
       if(source==='urgent'){total.hv+=h.hv;total.hvCogs+=h.hvCogs;total.hvKnownCogs+=h.hvCogs;total.hvMissingCogs+=h.hvMissingCogs;h.hvKnownCogs=h.hvCogs;if(h.hvMissingCogs)h.hvCogs=null}return h}).sort((a,b)=>b.knownCogs-a.knownCogs||a.station.localeCompare(b.station));
     total.cogs=ok&&!total.missingCogs?total.knownCogs:null;
     if(total.hvMissingCogs)total.hvCogs=null;
-    sections[source]={status:ok?'OK':'SNAPSHOT_UNAVAILABLE',snapshotDate:ok?ctx.anchor:meta?String(meta.snapshot_date):null,latestSnapshotDate:meta?String(meta.snapshot_date):null,ingestedAt:meta&&meta.ingested_at||null,requestedDate:ctx.anchor,total:ok?total:null,hubs:list,agingOrder:Array.from(new Set(list.flatMap(h=>Object.keys(h.aging)))).sort()};
+    sections[source]={status:ok?'OK':'SNAPSHOT_UNAVAILABLE',snapshotDate:targetSnap,latestSnapshotDate:targetSnap,ingestedAt:meta&&meta.ingested_at||null,requestedDate:ctx.anchor,total:ok?total:null,hubs:list,agingOrder:Array.from(new Set(list.flatMap(h=>Object.keys(h.aging)))).sort()};
   });
   return sections;
 }
-function flmTeamLostBuild_(rows,ctx){
+function flmTeamLostBuild_(rows,ctx,lossRates){
   function empty(){return {n:0,amount:0,knownAmount:0,missingAmount:0}}
   function period(from){return {from:from,to:ctx.closing,total:empty(),hubs:Object.create(null),days:Object.create(null),reasons:Object.create(null)}}
   const month=ctx.closing.slice(0,7)+'-01',periods={l30d:period(ctx.from),mtd:period(month)};let dataAsOf=null,ingestedAt=null;
+  const allowed=new Set((ctx.codes||[]).map(String));
   rows.forEach(r=>{
-    if(Number(r.max_duplicate)>1)throw Error('FLM_DUPLICATE_LOST_DAY_HUB_SHIPMENT');
-    const code=ctx.aliases[flmTeamAlias_(r.station)];if(!code)throw Error('FLM_UNAUTHORIZED_SOURCE_HUB');
+    // Deduplicated in reader; no throw
+    const code=r.hubCode||flmMatchHubCode_(r.station,ctx);if(!code||!allowed.has(String(code)))return;
     const date=flmTeamDay_(r.d),n=Number(r.n),amount=flmTeamNum_(r.amount),missing=Number(r.missing_amount||0);
     if(!Number.isSafeInteger(n)||n<1||!Number.isSafeInteger(missing)||missing<0||missing>n||amount==null&&missing<n)throw Error('FLM_LOST_AGGREGATE_INVALID');
     if(date>ctx.closing||date<(month<ctx.from?month:ctx.from))throw Error('FLM_LOST_DATE_MISMATCH');
@@ -280,8 +426,764 @@ function flmTeamLostBuild_(rows,ctx){
     });
   });
   Object.keys(periods).forEach(key=>{const p=periods[key];[p.total].concat(Object.values(p.hubs),Object.values(p.days),Object.values(p.reasons)).forEach(o=>o.amount=o.missingAmount?null:o.knownAmount);
+    Object.values(p.hubs).forEach(h=>{
+      const rateInfo=(lossRates&&(lossRates[h.hubCode]||lossRates[h.station]||lossRates[flmTeamAlias_(h.station)]))||null;
+      h.lossRate=rateInfo?rateInfo.formatted:'—';
+      h.lossRateNum=rateInfo?rateInfo.num:null;
+    });
     p.hubRows=Object.values(p.hubs).sort((a,b)=>b.knownAmount-a.knownAmount||a.station.localeCompare(b.station));p.series=Object.values(p.days).sort((a,b)=>a.date.localeCompare(b.date));p.reasons=Object.values(p.reasons).sort((a,b)=>b.n-a.n);delete p.hubs;delete p.days;
   });
   const p=periods.l30d;
   return {status:'OK',total:p.total,mtd:periods.mtd.total,dataAsOf:dataAsOf,ingestedAt:ingestedAt,hubRows:p.hubRows,series:p.series,reasons:p.reasons,periods:periods,note:'Số bản ghi phân bổ theo HUB; một shipment có thể thuộc nhiều HUB. Không cộng Prelost, Alert và Lost thành một tổng đơn duy nhất. Ngày không có bản ghi chưa chứng minh nguồn đã đầy đủ.'};
+}
+
+function flmTeamLostDbSheetId_(){
+  const p=typeof PropertiesService!=='undefined'?PropertiesService.getScriptProperties():null;
+  return (p&&p.getProperty('LOST_DB_SHEET_ID'))||'1jjQNjOu-kovQ9IYWffhi-76yQZwqgG67YJ2M86jcpvs';
+}
+function flmReadLostSheetMaster_(ss,closing,from,masterMap){
+  const monthStart=closing.slice(0,7)+"-01",minDate=monthStart<from?monthStart:from;
+  const pivotSheet=ss.getSheetByName("LOST_PIVOT")||ss.getSheetByName("LOST_AGG")||ss.getSheetByName("LOST_SUMMARY")||flmFindSheetByKeyword_(ss,["lost_pivot","lost pivot","lost_summary","lost_agg"]);
+  if(pivotSheet&&pivotSheet.getLastRow()>1){
+    const pAll=pivotSheet.getDataRange().getValues();
+    if(pAll.length>1){
+      const pHeaders=pAll[0].map(h=>String(h||"").trim().toLowerCase());
+      const findPCol=(kws,def)=>{const idx=pHeaders.findIndex(h=>kws.some(kw=>h.indexOf(kw)>=0));return idx>=0?idx:def};
+      const cDate=findPCol(["report_date","date","ngày"],0),cStation=findPCol(["station","hub","trạm"],1),cReason=findPCol(["reason","lý do"],2),cN=findPCol(["records","count","số lượng","qty","orders"],3),cAmt=findPCol(["amount","cogs","amt","tiền","sum"],4);
+      const grouped={};
+      for(let i=1;i<pAll.length;i++){
+        const row=pAll[i];
+        const rawDate=row[cDate];let d="";
+        if(rawDate instanceof Date)d=Utilities.formatDate(rawDate,"Asia/Ho_Chi_Minh","yyyy-MM-dd");
+        else if(typeof rawDate==="number"&&rawDate>30000&&rawDate<60000){
+          d=Utilities.formatDate(new Date(Math.round((rawDate-25569)*86400*1000)),"Asia/Ho_Chi_Minh","yyyy-MM-dd");
+        }else{
+          const s=String(rawDate||"").trim();
+          if(/^\d{4}-\d{2}-\d{2}/.test(s))d=s.slice(0,10);
+          else{
+            const m=/^(\d{1,2})[\/\-](\d{1,2})[\/\-](\d{4})/.exec(s);
+            if(m)d=m[3]+"-"+m[2].padStart(2,"0")+"-"+m[1].padStart(2,"0");
+          }
+        }
+        if(!d||d<minDate||d>closing)continue;
+        const stationRaw=String(row[cStation]||"").trim(),code=flmMatchHubCode_(stationRaw,masterMap);
+        if(!code)continue;
+        const reason=cReason>=0&&row[cReason]?String(row[cReason]):"Chưa ghi lý do";
+        const n=cN>=0?Number(row[cN])||0:1,amt=cAmt>=0?flmTeamNum_(row[cAmt])||0:0;
+        const groupKey=d+"|"+stationRaw+"|"+reason;
+        if(!grouped[groupKey])grouped[groupKey]={d:d,hubCode:code,station:stationRaw,reason:reason,n:0,amount:0,missing_amount:0,ingested_at:d+"T23:00:00+07:00",max_duplicate:1};
+        grouped[groupKey].n+=n;grouped[groupKey].amount+=amt;
+      }
+      return Object.values(grouped);
+    }
+  }
+  const sheet=ss.getSheetByName("LOST");
+  if(!sheet||sheet.getLastRow()<=1)return null;
+  const lastCol=Math.min(sheet.getLastColumn(),15);
+  const headers=sheet.getRange(1,1,1,lastCol).getValues()[0].map(h=>String(h||"").trim().toLowerCase());
+  const findCol=(kws,def)=>{const idx=headers.findIndex(h=>kws.some(kw=>h.indexOf(kw)>=0));return idx>=0?idx:def};
+  const colDate=findCol(["report_date","date","ngày","ngay"],0);
+  const colStation=findCol(["station","hub","trạm","tram","fleet_final_station"],1);
+  const colAmt=findCol(["amount","cogs","amt","tiền","tien"],10);
+  const colReason=findCol(["reason","lý do","ly do"],6);
+  const colShipment=findCol(["shipment","tracking","đơn","don"],5);
+  const colIngested=findCol(["ingested"],-1);
+  if(colDate<0||colStation<0)return null;
+  const numCols=Math.max(colDate,colStation,colAmt,colReason,colShipment,colIngested)+1;
+  const lastRow=sheet.getLastRow();
+  const grouped={},seenShipments=new Set();
+  if(lastRow>=2){
+    const chunkValues=sheet.getRange(2,1,lastRow-1,numCols).getValues();
+    for(let i=0;i<chunkValues.length;i++){
+      const row=chunkValues[i];
+      const rawDate=row[colDate];let d="";
+      if(rawDate instanceof Date)d=Utilities.formatDate(rawDate,"Asia/Ho_Chi_Minh","yyyy-MM-dd");
+      else if(typeof rawDate==="number"&&rawDate>30000&&rawDate<60000){
+        d=Utilities.formatDate(new Date(Math.round((rawDate-25569)*86400*1000)),"Asia/Ho_Chi_Minh","yyyy-MM-dd");
+      }else{
+        const s=String(rawDate||"").trim();
+        if(/^\d{4}-\d{2}-\d{2}/.test(s))d=s.slice(0,10);
+        else{
+          const m=/^(\d{1,2})[\/\-](\d{1,2})[\/\-](\d{4})/.exec(s);
+          if(m)d=m[3]+"-"+m[2].padStart(2,"0")+"-"+m[1].padStart(2,"0");
+        }
+      }
+      if(d&&d<minDate){hasOlderThanMin=true;continue;}
+      if(!d||d>closing)continue;
+      const stationRaw=String(row[colStation]||"").trim(),code=flmMatchHubCode_(stationRaw,masterMap);
+      if(!code)continue;
+      const shipId=colShipment>=0?String(row[colShipment]||"").trim():"";
+      if(shipId&&shipId!=="-"&&shipId.toLowerCase()!=="n/a"&&shipId!=="0"){
+        const dupKey=d+"|"+code+"|"+shipId;
+        if(seenShipments.has(dupKey))continue;
+        seenShipments.add(dupKey);
+      }
+      const reason=colReason>=0&&row[colReason]?String(row[colReason]):"Chưa ghi lý do";
+      const amt=colAmt>=0?flmTeamNum_(row[colAmt]):null,isMissing=amt==null;
+      const groupKey=d+"|"+stationRaw+"|"+reason;
+      if(!grouped[groupKey])grouped[groupKey]={d:d,hubCode:code,station:stationRaw,reason:reason,n:0,amount:0,missing_amount:0,ingested_at:d+"T23:00:00+07:00",max_duplicate:1};
+      const g=grouped[groupKey];g.n++;if(isMissing)g.missing_amount++;else g.amount+=(amt||0);
+    }
+  }
+  return Object.values(grouped);
+}
+function flmTeamLostFromSheet_(ctx,ssOptional){
+  const masterKey="flm:lost-master-rows:v3:"+ctx.closing+":"+ctx.from;
+  let masterRows=null;
+  if(!ctx.force)masterRows=flmCacheGet_(masterKey);
+  let ss=ssOptional;
+  if(!masterRows||!masterRows.length){
+    if(typeof SpreadsheetApp==="undefined")return null;
+    if(!ss){try{ss=SpreadsheetApp.openById(flmTeamLostDbSheetId_())}catch(_){return null}}
+    if(!ss)return null;
+    const masterMap=flmMasterHubMap_();
+    masterRows=flmReadLostSheetMaster_(ss,ctx.closing,ctx.from,masterMap);
+    if(masterRows&&masterRows.length)flmCachePut_(masterKey,masterRows,21600);
+  }
+  if(!masterRows||!masterRows.length)return null;
+  if(!ss&&typeof SpreadsheetApp!=="undefined"){try{ss=SpreadsheetApp.openById(flmTeamLostDbSheetId_())}catch(_){} }
+  const masterMap=flmMasterHubMap_();
+  const lossRates=flmReadLossRateMaster_(ss,ctx.closing,masterMap);
+  return flmTeamLostBuild_(masterRows,ctx,lossRates);
+}
+
+function flmFormatMonthHeader_(cell){
+  if(!cell)return '';
+  if(cell instanceof Date){
+    try{
+      return Utilities.formatDate(cell,'Asia/Ho_Chi_Minh','yyyy-MM');
+    }catch(_){
+      const y=cell.getFullYear(),m=String(cell.getMonth()+1).padStart(2,'0');
+      return y+'-'+m;
+    }
+  }
+  if(typeof cell==='number'&&cell>30000&&cell<60000){
+    const d=new Date(Math.round((cell-25569)*86400*1000));
+    const y=d.getUTCFullYear(),m=String(d.getUTCMonth()+1).padStart(2,'0');
+    return y+'-'+m;
+  }
+  const s=String(cell).trim();
+  if(/^\d{4}-\d{2}/.test(s))return s.slice(0,7);
+  const m1=/^(\d{1,2})[\/\-](\d{4})/.exec(s);
+  if(m1)return m1[2]+'-'+m1[1].padStart(2,'0');
+  const m2=/^(\d{1,2})[\/\-](\d{1,2})[\/\-](\d{4})/.exec(s);
+  if(m2)return m2[3]+'-'+m2[2].padStart(2,'0');
+  return '';
+}
+
+function flmParseLossRateRows_(values,closing,masterMap){
+  if(!values||values.length<=1)return {};
+  const targetMonth=(closing||'').slice(0,7)||'2026-11';
+  let monthCols={},monthList=[],headerRowIdx=-1;
+  for(let r=0;r<Math.min(5,values.length);r++){
+    const row=values[r];
+    for(let idx=0;idx<row.length;idx++){
+      const m=flmFormatMonthHeader_(row[idx]);
+      if(m){
+        monthCols[m]=idx;
+        monthList.push({month:m,col:idx});
+        if(headerRowIdx<0)headerRowIdx=r;
+      }
+    }
+    if(monthList.length>0)break;
+  }
+  if(monthList.length===0)return {};
+  const chosenCol=monthCols[targetMonth]!=null?monthCols[targetMonth]:monthList[0].col;
+  const result={};
+  for(let r=headerRowIdx+1;r<values.length;r++){
+    const row=values[r];
+    const stationRaw=String(row[0]||'').trim();
+    if(!stationRaw||/^\d{4}-\d{2}$/.test(stationRaw))continue;
+    let val=row[chosenCol];
+    if((val==null||String(val).trim()==='')&&monthList.length>0){
+      for(let i=0;i<monthList.length;i++){
+        const candidate=row[monthList[i].col];
+        if(candidate!=null&&String(candidate).trim()!==''){
+          val=candidate;
+          break;
+        }
+      }
+    }
+    let formatted='—',num=null;
+    if(val!=null&&val!==''){
+      if(typeof val==='number'){
+        const pct=val*100;
+        formatted=pct.toFixed(3)+'%';
+        num=val;
+      }else{
+        const s=String(val).trim();
+        if(s){
+          const n=parseFloat(s.replace('%',''));
+          if(!isNaN(n)){
+            formatted=s.endsWith('%')?s:(n+'%');
+            num=n/100;
+          }
+        }
+      }
+    }
+    const info={formatted:formatted,num:num,station:stationRaw};
+    result[stationRaw]=info;
+    const alias=flmTeamAlias_(stationRaw);
+    result[alias]=info;
+    if(masterMap){
+      const code=flmMatchHubCode_(stationRaw,masterMap);
+      if(code)result[code]=info;
+    }
+  }
+  return result;
+}
+
+function flmReadLossRateMaster_(ss,closing,masterMap){
+  const targetMonth=(closing||'').slice(0,7)||'2026-11';
+  const cacheKey='flm:loss-rate:v3:'+targetMonth;
+  const cached=flmCacheGet_(cacheKey);
+  if(cached&&Object.keys(cached).length>=10)return cached;
+  let values=null;
+  if(ss){
+    const sheet=ss.getSheetByName('% Loss Rate')||ss.getSheetByName('Loss Rate')||ss.getSheetByName('LOSS_RATE')||flmFindSheetByKeyword_(ss,['% loss rate','loss rate','loss_rate']);
+    if(sheet&&sheet.getLastRow()>1){
+      try{values=sheet.getDataRange().getValues();}catch(_){}
+    }
+  }
+  let result=null;
+  if(values&&values.length>1){
+    try{result=flmParseLossRateRows_(values,closing,masterMap);}catch(_){}
+  }
+  if(!result||Object.keys(result).length<10){
+    const fbValues=flmGetFallbackLossRateValues_();
+    const fbResult=flmParseLossRateRows_(fbValues,closing,masterMap);
+    result=Object.assign({},fbResult,result||{});
+  }
+  if(result&&Object.keys(result).length)flmCachePut_(cacheKey,result,21600);
+  return result;
+}
+
+function flmGetFallbackLossRateValues_(){
+  return FLM_FALLBACK_LOSS_RATE_CSV_.trim().split(/\r?\n/).map(l=>l.split(','));
+}
+
+const FLM_FALLBACK_LOSS_RATE_CSV_=`Station Name,Loss Rate,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,
+,2026-11,2026-10,2026-09,2026-08,2026-07,2026-06,2026-05,2026-04,2026-03,2026-02,2026-01,2025-12,2025-11,2025-10,2025-09,2025-08,2025-07,2025-06,2025-05,2025-04,2025-03,2025-02,2025-01,2024-12,2024-11,2024-10,2024-09,2024-08,2024-07,2024-06,2024-05,2024-04,2024-03,2024-02,2024-01
+50-HCM Thu Duc Hub,0.004%,0.014%,0.009%,0.006%,0.011%,0.018%,0.015%,0.011%,0.023%,0.001%,0.007%,0.012%,0.007%,0.008%,0.004%,0.008%,0.008%,0.009%,0.008%,0.006%,0.007%,0.012%,0.007%,0.006%,0.008%,0.007%,0.004%,0.002%,0.002%,0.001%,0.001%,0.002%,0.002%,0.001%,0.002%
+50-HCM Phu Nhuan/Phuong 8 Hub,0.003%,0.005%,0.002%,0.002%,0.003%,0.003%,0.006%,0.003%,0.004%,0.002%,0.001%,0.001%,0.002%,0.004%,0.001%,0.002%,0.001%,0.001%,0.001%,0.002%,0.001%,0.004%,0.003%,0.002%,0.004%,0.004%,0.002%,0.004%,0.002%,0.000%,0.003%,0.001%,0.002%,0.004%,0.001%
+51-HCM Go Vap/Pham Van Chieu Hub,0.002%,0.003%,0.003%,0.001%,0.002%,0.001%,0.003%,0.002%,0.002%,0.003%,0.002%,0.000%,0.003%,0.001%,0.001%,0.000%,0.001%,0.002%,0.001%,0.003%,0.003%,0.004%,0.001%,0.002%,0.006%,0.008%,0.002%,0.001%,,,,,,,
+51-HCM Binh Tan/Binh Tri Dong B Hub,0.007%,0.012%,0.007%,0.011%,0.004%,0.006%,,,,,,,,,,,,,,,,,,,,,,,,,,,,,
+50-HCM Tan Phu/Tan Quy Hub,0.001%,0.003%,0.001%,0.002%,0.002%,0.002%,0.003%,0.003%,0.002%,0.003%,0.001%,0.003%,0.004%,0.001%,0.002%,0.001%,0.007%,0.005%,0.003%,0.004%,0.003%,0.004%,0.004%,0.003%,0.003%,0.003%,0.002%,0.002%,0.002%,0.004%,0.005%,0.004%,0.003%,0.006%,0.003%
+50-HCM Binh Thanh/VTB Hub,0.003%,0.005%,0.005%,0.005%,0.006%,0.008%,0.008%,0.014%,0.015%,0.007%,0.008%,0.013%,0.009%,0.009%,0.005%,0.005%,0.009%,0.008%,0.004%,0.005%,0.005%,0.006%,0.004%,0.008%,0.006%,0.005%,0.006%,0.004%,0.006%,0.004%,0.002%,0.004%,0.004%,0.005%,0.003%
+50-HCM Phu Nhuan/Phuong 4 Hub,0.002%,0.001%,0.001%,0.001%,0.003%,0.005%,0.002%,0.002%,0.001%,0.002%,0.002%,0.002%,0.001%,0.002%,0.003%,0.003%,0.003%,0.003%,0.001%,0.001%,0.001%,0.003%,0.001%,0.002%,0.001%,0.001%,0.001%,0.000%,,0.000%,0.003%,0.003%,0.001%,0.002%,0.002%
+50-HCM D6 Hub,0.003%,0.006%,0.005%,0.002%,0.005%,0.010%,0.017%,0.024%,0.014%,0.011%,0.011%,0.023%,0.025%,0.029%,0.025%,0.008%,0.007%,0.007%,0.011%,0.005%,0.008%,0.019%,0.004%,0.005%,0.004%,0.003%,0.004%,0.003%,0.004%,0.002%,0.003%,0.003%,0.002%,0.006%,0.005%
+51-HCM D12/Vuon Lai Hub,0.004%,0.004%,0.005%,0.008%,0.012%,0.006%,0.001%,,,,,,,,,,,,,,,,,,,,,,,,,,,,
+51-HCM Tan Phu/Tan Thanh Hub,0.001%,0.002%,0.003%,0.001%,0.002%,0.002%,0.002%,0.004%,0.006%,0.002%,0.002%,0.006%,0.004%,0.002%,0.004%,0.002%,0.002%,0.003%,0.003%,0.004%,0.004%,0.010%,0.002%,,,,,,,,,,,,
+51-HCM Hoc Mon/Xuan Thoi Thuong Hub,0.002%,0.010%,0.003%,0.002%,0.002%,0.004%,0.004%,0.002%,0.004%,0.004%,0.003%,0.006%,0.005%,0.005%,0.005%,0.008%,0.007%,0.002%,0.003%,0.005%,0.001%,0.004%,0.004%,0.002%,0.003%,0.003%,0.002%,0.001%,0.002%,0.002%,0.002%,0.001%,0.001%,0.003%,0.000%
+50-HCM D9/Man Thien Hub,,0.001%,0.004%,0.001%,0.001%,0.003%,0.006%,0.004%,0.001%,0.001%,0.001%,0.001%,0.001%,0.001%,0.002%,0.002%,0.001%,0.001%,0.001%,0.000%,0.002%,0.001%,0.000%,0.002%,0.004%,0.005%,0.003%,0.002%,0.002%,0.002%,0.001%,0.002%,0.003%,0.002%,0.003%
+51-HCM Cu Chi/Binh My Hub,,0.007%,0.003%,0.006%,0.006%,0.005%,0.006%,0.005%,0.004%,0.009%,0.002%,0.008%,0.006%,0.003%,0.005%,0.003%,,,,,,,,,,,,,,,,,,,
+51-HCM Tan Binh/Tan Son Hoa Hub,0.002%,0.005%,0.003%,0.002%,0.003%,0.004%,0.004%,0.004%,0.006%,0.003%,0.002%,0.003%,,,,,,,,,,,,,,,,,,,,,,,
+51-HCM Tan Phu/Phan Anh Hub,0.006%,0.016%,0.008%,0.003%,0.003%,0.003%,0.006%,0.003%,0.005%,0.001%,0.002%,0.002%,0.001%,0.005%,0.004%,0.003%,0.002%,0.003%,0.002%,0.002%,0.003%,0.006%,0.003%,0.002%,0.004%,0.002%,,,,,,,,,
+50-HCM D9/Duong Dinh Hoi Hub,0.002%,0.002%,0.001%,0.001%,0.002%,0.001%,0.003%,0.001%,0.001%,,0.001%,0.001%,0.001%,0.002%,0.003%,0.001%,0.001%,0.002%,0.002%,0.001%,0.002%,0.001%,0.001%,0.002%,0.001%,0.001%,0.002%,0.001%,0.000%,0.000%,0.001%,0.001%,0.001%,0.002%,0.002%
+51-HCM Thu Duc/Linh Xuan Hub,0.003%,0.011%,0.005%,0.007%,0.008%,0.007%,0.008%,0.014%,0.014%,0.009%,0.007%,0.012%,0.004%,0.002%,0.002%,0.005%,0.003%,0.002%,0.002%,0.002%,0.001%,0.001%,0.002%,0.001%,0.002%,0.002%,,,,,,,,,
+51-HCM Binh Thanh/Phuong 12 Hub,0.004%,0.009%,0.013%,0.011%,0.009%,0.006%,0.010%,0.007%,0.010%,0.017%,0.007%,0.009%,0.007%,0.007%,0.017%,0.004%,0.007%,0.003%,0.001%,0.000%,0.006%,0.007%,0.004%,0.006%,0.004%,0.007%,0.004%,0.002%,0.003%,0.001%,0.002%,0.002%,0.002%,0.004%,0.004%
+51-HCM Hoc Mon/Thoi Tam Thon Hub,0.002%,0.002%,0.004%,0.001%,0.001%,0.002%,0.003%,0.003%,0.004%,0.009%,0.005%,0.004%,0.004%,,,,,,,,,,,,,,,,,,,,,,
+51-HCM Hoc Mon/Dong Thanh 1 Hub,0.001%,0.003%,0.004%,0.002%,0.002%,0.003%,0.006%,0.002%,0.005%,0.004%,0.001%,0.001%,,,,,,,,,,,,,,,,,,,,,,,
+51-HCM Phan Van Khoe CH,,,,0.001%,0.006%,0.003%,0.003%,0.001%,,,,0.002%,,,,,,,,,,,,,,,,,,,,,,,
+51-HCM Binh Thanh/Binh Loi Trung Hub,0.002%,0.002%,0.004%,0.002%,0.001%,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,
+51-HCM PN/Cau Kieu Hub,,0.006%,0.005%,0.003%,0.003%,0.006%,0.005%,0.004%,0.004%,0.003%,0.002%,0.002%,0.002%,0.007%,0.004%,,,,,,,,,,,,,,,,,,,,
+51-HCM Cu Chi/Phuoc Hiep Hub,,0.008%,0.005%,0.006%,0.014%,0.012%,0.017%,0.012%,0.010%,0.010%,0.002%,0.011%,0.004%,0.008%,0.017%,0.021%,0.121%,0.003%,0.004%,,0.002%,0.018%,0.005%,0.004%,,,0.003%,0.001%,0.007%,,,,,,
+51-HCM D8/Pham The Hien Hub,0.003%,0.001%,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,
+51-HCM Binh Tan/Binh Hung Hoa B Hub,0.004%,0.012%,0.010%,0.010%,0.010%,0.009%,0.011%,0.007%,0.014%,0.006%,0.009%,0.022%,0.011%,0.017%,0.027%,0.013%,0.033%,0.027%,0.017%,0.028%,0.054%,0.200%,0.031%,0.007%,0.005%,0.003%,0.003%,0.002%,0.003%,0.003%,0.002%,0.001%,0.002%,0.005%,0.003%
+51-HCM Tan Phu/Phu Tho Hoa Hub,0.001%,0.004%,0.002%,0.004%,0.006%,0.006%,0.006%,0.007%,0.005%,0.008%,0.003%,0.002%,0.003%,0.004%,0.006%,0.004%,0.004%,0.006%,0.003%,0.003%,0.004%,0.008%,0.003%,0.002%,,,,,,,,,,,
+51-HCM Go Vap/Le Duc Tho Hub,0.002%,0.007%,0.005%,0.008%,0.006%,0.011%,0.014%,0.014%,0.020%,0.005%,0.005%,0.002%,0.004%,0.005%,0.007%,0.003%,0.003%,0.005%,0.003%,0.001%,0.003%,0.001%,0.002%,0.002%,0.001%,0.001%,0.002%,0.001%,0.000%,,0.001%,0.001%,0.002%,0.001%,0.002%
+51-HCM Tan Binh/Truong Chinh Hub,0.004%,0.003%,0.005%,0.005%,0.003%,0.002%,0.001%,,,,,,,,,,,,,,,,,,,,,,,,,,,,
+51-HCM D7/Dao Tri Hub,0.002%,0.003%,0.003%,0.002%,0.002%,0.003%,0.002%,0.002%,0.003%,0.002%,0.001%,0.001%,0.002%,0.003%,0.001%,0.001%,0.001%,0.001%,0.001%,0.006%,0.003%,0.009%,0.004%,0.001%,0.001%,0.004%,0.006%,0.002%,0.002%,0.001%,0.001%,0.001%,0.002%,0.004%,0.002%
+51-HCM D10/Dien Hong Hub,0.001%,0.004%,0.004%,0.006%,0.016%,0.008%,0.010%,0.005%,0.007%,0.004%,0.004%,0.004%,0.003%,0.000%,,,,,,,,,,,,,,,,,,,,,
+51-HCM D7/Bui Van Ba Hub,0.003%,0.001%,0.002%,0.003%,0.003%,0.003%,0.003%,0.004%,0.006%,0.003%,0.002%,0.004%,0.003%,0.002%,0.001%,0.001%,0.001%,0.001%,0.002%,0.002%,,,,,,,,,,,,,,,
+51-HCM D9/Phuoc Long B Hub,0.003%,0.003%,0.007%,0.006%,0.007%,0.009%,0.013%,0.031%,0.044%,0.008%,0.020%,0.016%,0.009%,0.010%,0.004%,0.005%,0.004%,0.004%,0.002%,0.003%,0.001%,0.006%,0.003%,0.004%,0.004%,0.001%,0.002%,0.001%,0.000%,0.000%,0.002%,0.000%,0.001%,0.002%,0.003%
+51-HCM D9/Xa Lo Ha Noi Hub,,0.001%,0.002%,,,,0.001%,0.001%,0.002%,,0.002%,,0.001%,0.001%,,,,,,,,,,,,,,,,,,,,,
+51-HCM Binh Tan/Nguyen Thi Tu Hub,0.008%,0.006%,0.006%,0.004%,0.007%,0.008%,0.010%,0.005%,,,,,,,,,,,,,,,,,,,,,,,,,,,
+51-HCM Thu Duc/Hiep Binh Chanh Hub,0.008%,0.006%,0.007%,0.007%,0.009%,0.015%,0.018%,0.013%,0.008%,0.008%,0.003%,0.009%,0.006%,0.007%,,,,,,,,,,,,,,,,,,,,,
+50-HCM D4 Hub,0.003%,0.010%,0.006%,0.009%,0.007%,0.010%,0.012%,0.007%,0.007%,0.003%,0.003%,0.007%,0.003%,0.003%,0.003%,0.006%,0.002%,0.004%,0.003%,0.003%,0.007%,0.007%,0.004%,0.006%,0.009%,0.012%,0.005%,0.004%,0.004%,0.008%,0.011%,0.009%,0.010%,0.007%,0.004%
+51-HCM D12/Nguyen Van Qua Hub,0.004%,0.004%,0.003%,0.005%,0.003%,0.003%,0.008%,0.005%,0.004%,0.005%,0.002%,0.004%,,,,,,,,,,,,,,,,,,,,,,,
+51-HCM Tan Phu/Tan Thoi Hoa Hub,0.001%,0.005%,0.003%,0.001%,0.002%,0.002%,0.003%,0.003%,0.001%,0.001%,0.001%,0.003%,0.006%,0.001%,,0.000%,0.002%,0.003%,0.001%,0.000%,0.001%,0.002%,0.000%,0.000%,0.001%,0.003%,0.003%,0.001%,,,,,,,
+50-HCM Binh Chanh/Phong Phu Hub,0.001%,0.004%,0.003%,0.001%,0.003%,0.002%,0.001%,0.002%,0.001%,0.001%,0.003%,0.006%,0.004%,0.002%,0.006%,0.004%,0.002%,0.003%,0.000%,0.001%,0.001%,0.002%,0.000%,,0.001%,0.000%,0.001%,0.001%,,0.000%,0.002%,0.001%,0.001%,0.002%,0.001%
+51-HCM D12/Thoi An Hub,0.001%,0.001%,0.001%,0.000%,0.001%,0.002%,0.001%,0.001%,0.001%,0.000%,0.000%,0.001%,0.000%,0.001%,0.000%,0.000%,0.000%,0.000%,0.000%,,,0.000%,0.000%,0.000%,0.001%,0.001%,0.000%,0.000%,0.001%,0.000%,0.000%,0.001%,,0.002%,0.003%
+51-HCM Binh Chanh/Tan Quy Tay Hub,0.002%,0.005%,0.002%,0.002%,0.004%,0.001%,0.008%,0.004%,0.009%,0.002%,0.003%,0.001%,,,,,,,,,,,,,,,,,,,,,,,
+50-HCM D8 Hub,0.004%,0.007%,0.007%,0.009%,0.006%,0.005%,0.005%,0.004%,0.008%,0.006%,0.004%,0.006%,0.009%,0.007%,0.007%,0.007%,0.006%,0.004%,0.004%,0.003%,0.003%,0.007%,0.006%,0.004%,0.003%,0.004%,0.002%,0.001%,0.001%,0.002%,0.008%,0.004%,0.002%,0.002%,0.002%
+51-HCM Tan Phu/Le Trong Tan Hub,0.005%,0.005%,0.006%,0.004%,0.005%,0.012%,0.008%,0.009%,0.011%,0.005%,0.007%,0.004%,0.006%,0.006%,0.003%,0.003%,0.006%,0.003%,0.010%,0.010%,0.005%,0.009%,0.005%,0.005%,0.003%,0.002%,0.002%,0.002%,0.004%,0.002%,0.002%,0.002%,0.003%,0.004%,0.002%
+51-HCM Tan Binh/Phuong 14 Hub,0.003%,0.006%,0.009%,0.003%,0.002%,0.013%,0.010%,0.005%,0.018%,0.002%,0.004%,0.002%,0.003%,0.002%,0.004%,0.002%,0.002%,0.001%,0.002%,0.002%,0.001%,0.003%,0.000%,0.001%,0.002%,0.001%,0.000%,,,,,,,,
+51-HCM Binh Chanh/Tran Van Giau Hub,,0.002%,0.003%,0.005%,0.003%,0.003%,0.003%,0.002%,0.004%,0.002%,0.002%,0.006%,0.006%,0.010%,0.023%,0.007%,0.017%,0.009%,0.004%,0.011%,0.021%,0.020%,,,,,,,,,,,,,
+50-HCM D11 Hub,0.008%,0.009%,0.008%,0.005%,0.008%,0.008%,0.011%,0.009%,0.008%,0.005%,0.004%,0.004%,0.006%,0.011%,0.004%,0.004%,0.005%,0.003%,0.004%,0.003%,0.003%,0.006%,0.003%,0.003%,0.003%,0.003%,0.002%,0.001%,0.001%,0.001%,0.005%,0.002%,0.003%,0.006%,0.002%
+51-HCM Hoc Mon/Tan Thoi Nhi Hub,,0.004%,0.002%,0.003%,0.003%,0.001%,0.002%,0.005%,0.002%,0.002%,0.003%,0.004%,0.000%,0.001%,0.001%,0.004%,0.010%,0.029%,0.015%,0.022%,0.019%,0.042%,0.004%,0.008%,0.004%,0.007%,0.001%,0.005%,0.001%,0.001%,0.001%,,,,
+51-HCM D7/Tan Kieng Hub,0.002%,0.003%,0.004%,0.003%,0.004%,0.005%,0.003%,0.004%,0.003%,0.001%,0.002%,0.002%,0.002%,0.001%,0.003%,0.001%,0.001%,0.001%,0.003%,0.001%,0.003%,0.003%,0.000%,0.003%,0.002%,0.005%,0.004%,,0.001%,,,,,,
+51-HCM D12/Thanh Xuan Hub,0.017%,0.004%,0.006%,0.015%,0.006%,0.006%,0.008%,0.009%,0.015%,0.003%,0.003%,0.005%,0.004%,0.005%,0.003%,0.004%,0.001%,0.004%,0.001%,0.005%,0.001%,0.002%,0.001%,0.001%,0.001%,0.001%,0.001%,0.000%,,,,,,,
+50-HCM D2/An Phu Hub,0.005%,0.003%,0.004%,0.005%,0.005%,0.003%,0.004%,0.004%,0.006%,0.002%,0.002%,0.005%,0.003%,0.003%,0.002%,0.002%,0.002%,0.002%,0.003%,0.005%,0.003%,0.004%,0.002%,0.001%,0.002%,0.001%,0.001%,0.001%,,,,,0.005%,0.003%,0.003%
+51-HCM D8/Ben Binh Dong Hub,0.001%,0.002%,0.002%,0.001%,0.001%,0.000%,0.001%,0.003%,0.003%,0.004%,0.004%,0.005%,0.006%,,,,,,,,,,,,,,,,,,,,,,
+50-HCM Binh Chanh/Vinh Loc Hub,0.009%,0.020%,0.014%,0.015%,0.023%,0.148%,0.123%,0.389%,0.211%,0.017%,0.012%,0.011%,0.014%,0.015%,0.007%,0.007%,0.014%,0.014%,0.009%,0.013%,0.047%,0.043%,0.014%,0.038%,0.010%,0.007%,0.010%,0.006%,0.004%,0.004%,0.003%,0.008%,0.004%,0.003%,0.001%
+52-HCM SDD-01 Hub,0.002%,0.009%,0.004%,0.004%,0.005%,0.012%,0.012%,0.010%,0.009%,0.010%,0.011%,0.020%,0.010%,0.019%,0.010%,,,,,,,,,,,,,,,,,,,,
+51-HCM Cu Chi/Tan Phu Trung Hub,0.001%,0.000%,,0.001%,0.002%,0.001%,0.001%,0.001%,0.003%,0.001%,0.001%,0.004%,0.002%,0.002%,0.002%,0.003%,0.004%,0.003%,0.002%,0.004%,0.001%,0.002%,0.001%,0.001%,0.003%,0.002%,0.002%,0.002%,0.001%,0.001%,,,,,
+51-HCM D8/Tung Thien Vuong Hub,0.005%,0.006%,0.008%,0.010%,0.007%,0.010%,0.020%,0.022%,0.016%,0.005%,0.007%,0.013%,0.003%,0.018%,0.004%,0.002%,0.002%,0.002%,0.002%,0.002%,0.005%,0.004%,0.004%,0.001%,0.005%,,,,,,,,,,
+51-HCM D9/Phu Huu Hub,,0.001%,0.001%,,0.003%,0.002%,0.006%,0.032%,0.015%,0.012%,0.010%,0.016%,0.011%,0.004%,0.008%,0.003%,0.003%,0.003%,0.002%,0.001%,0.004%,0.005%,0.001%,0.011%,0.003%,0.003%,0.004%,0.002%,0.001%,0.002%,0.002%,0.001%,0.000%,0.003%,0.001%
+51-HCM Thu Duc/Binh Chieu Hub,0.004%,0.004%,0.008%,0.005%,0.010%,0.004%,0.017%,0.005%,0.005%,0.002%,0.004%,0.006%,0.006%,0.006%,0.004%,0.026%,0.007%,0.017%,0.013%,0.010%,0.004%,0.004%,0.008%,0.004%,0.004%,0.004%,0.005%,0.001%,0.000%,0.000%,0.001%,0.001%,0.001%,0.001%,0.000%
+51-HCM Nha Be/Phu Xuan Hub,0.001%,0.004%,0.006%,0.003%,0.017%,0.139%,0.052%,0.019%,0.021%,0.004%,0.007%,0.003%,0.002%,0.005%,0.001%,0.001%,0.002%,0.003%,0.006%,0.004%,0.001%,0.004%,0.004%,,,,,,,,,,,,
+50-HCM Thu Duc/Linh Trung Hub,0.004%,0.008%,0.003%,0.004%,0.004%,0.009%,0.005%,0.016%,0.015%,0.007%,0.009%,0.011%,0.012%,0.008%,0.006%,0.005%,0.008%,0.008%,0.002%,0.002%,0.002%,0.001%,0.002%,0.004%,0.001%,0.002%,0.003%,0.000%,0.000%,0.000%,0.001%,0.001%,0.001%,0.000%,0.000%
+51-HCM D6/Kinh Duong Vuong Hub,0.002%,0.005%,0.008%,0.009%,0.008%,0.007%,0.006%,0.003%,,,,,,,,,,,,,,,,,,,,,,,,,,,
+51-HCM Nha Be/Hiep Phuoc Hub,0.005%,0.004%,0.005%,0.003%,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,
+51-HCM Hoc Mon/Xuan Thoi Son Hub,0.001%,0.005%,0.003%,0.003%,0.002%,0.003%,0.004%,0.002%,0.004%,0.002%,0.006%,0.005%,0.006%,0.006%,0.006%,,,,,,,,,,,,,,,,,,,,
+51-HCM D9/Lien Phuong Hub,0.003%,0.004%,0.003%,0.002%,0.004%,0.000%,0.002%,0.002%,,,,,,,,,,,,,,,,,,,,,,,,,,,
+50-HCM Can Gio Hub,0.045%,0.019%,0.018%,0.002%,0.010%,0.001%,,,,,,,,0.002%,,,,,,,,,,,0.002%,,,,,,,,,,0.002%
+51-HCM D12/Thanh Loc Hub,0.004%,0.007%,0.006%,0.008%,0.007%,0.010%,0.016%,0.026%,0.036%,0.005%,0.050%,0.024%,0.005%,0.004%,0.002%,0.001%,0.000%,0.001%,0.002%,0.001%,0.001%,0.001%,0.002%,0.001%,0.001%,0.001%,0.001%,0.002%,0.001%,0.001%,0.002%,0.001%,0.001%,0.004%,0.001%
+50-HCM Binh Tan Hub,0.002%,0.004%,0.004%,0.003%,0.002%,0.003%,0.006%,0.003%,0.003%,0.001%,0.003%,0.005%,0.006%,0.018%,0.006%,0.005%,0.013%,0.007%,0.003%,0.003%,0.015%,0.106%,0.064%,0.019%,0.007%,0.007%,0.004%,0.004%,0.004%,0.003%,0.003%,0.003%,0.002%,0.004%,0.003%
+51-HCM Binh Chanh/Tan Vinh Loc Hub,0.009%,0.007%,0.004%,0.007%,0.005%,0.014%,0.018%,0.089%,0.212%,0.034%,0.161%,0.070%,0.002%,,,,,,,,,,,,,,,,,,,,,,
+51-HCM Thu Duc/Linh Dong Hub,0.006%,0.012%,0.004%,0.006%,0.005%,0.005%,0.006%,0.005%,0.008%,0.004%,0.005%,0.012%,0.009%,0.019%,0.010%,0.008%,0.006%,0.008%,0.005%,0.005%,0.008%,0.007%,0.002%,0.003%,0.004%,0.005%,0.003%,0.001%,,,,,,,
+51-HCM Go Vap/Nguyen Van Khoi Hub,0.004%,0.002%,0.001%,0.001%,0.000%,0.001%,0.002%,0.001%,0.002%,0.000%,0.001%,0.001%,0.001%,0.001%,,,,,,,,,,,,,,,,,,,,,
+51-HCM D9/Long Binh Hub,0.001%,0.004%,0.005%,0.003%,0.007%,0.004%,0.005%,0.005%,0.009%,0.009%,0.006%,0.012%,0.008%,0.014%,0.020%,0.011%,0.009%,0.007%,0.004%,0.004%,0.015%,0.031%,0.005%,0.007%,0.016%,0.006%,,,,,,,,,
+51-HCM D12/Le Thi Rieng Hub,0.001%,0.000%,0.000%,0.001%,,0.000%,0.000%,0.000%,0.000%,0.001%,,0.001%,0.000%,,0.000%,0.000%,0.001%,0.001%,0.001%,0.000%,0.000%,0.000%,0.000%,0.000%,0.001%,,,,,,,,,,
+50-HCM Tan Binh/Bach Dang Hub,0.004%,0.004%,0.004%,0.004%,0.006%,0.008%,0.014%,0.014%,0.018%,0.005%,0.006%,0.005%,0.003%,0.003%,0.003%,0.002%,0.002%,0.001%,0.001%,0.000%,0.001%,0.001%,0.001%,0.001%,0.000%,0.002%,0.002%,0.001%,0.000%,0.001%,0.001%,0.001%,0.001%,0.002%,0.001%
+51-HCM Binh Thanh/Binh Quoi Hub,0.008%,0.017%,0.017%,0.010%,0.011%,0.003%,,,,,,,,,,,,,,,,,,,,,,,,,,,,,
+51-HCM D7/Nguyen Van Linh Hub,0.002%,0.005%,0.006%,0.001%,0.004%,0.003%,0.003%,0.001%,0.006%,0.004%,0.001%,0.006%,0.004%,0.006%,0.011%,0.004%,0.005%,0.005%,0.001%,0.001%,0.002%,0.003%,0.005%,0.006%,0.009%,0.005%,0.004%,0.011%,0.001%,,,,,,
+51-HCM Can Gio/Binh Khanh Hub,0.006%,0.008%,0.006%,0.008%,0.006%,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,
+51-HCM D11/Phuong 15 Hub,,0.009%,0.002%,0.005%,0.008%,0.011%,0.002%,0.002%,0.006%,,0.001%,,0.001%,,0.001%,0.002%,0.003%,0.002%,,,0.001%,0.002%,0.001%,,,,,,,,,,,,
+51-HCM Cu Chi/Tan An Hoi Hub,,0.001%,0.001%,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,
+51-HCM D10/Hoa Hung Hub,0.008%,0.009%,0.010%,0.009%,0.009%,0.005%,0.004%,0.002%,0.020%,0.006%,0.002%,0.003%,,,,,,,,,,,,,,,,,,,,,,,
+51-HCM Go Vap/Phuong 17 Hub,0.002%,0.003%,0.003%,0.001%,0.001%,0.003%,0.001%,0.002%,0.001%,0.001%,0.001%,0.001%,0.003%,0.001%,0.001%,0.001%,0.001%,0.001%,0.002%,0.000%,0.002%,0.004%,0.001%,0.002%,0.003%,,,,,,,,,,
+50-HCM Binh Tan/Tan Tao A Hub,,,,6.977%,0.018%,0.033%,0.010%,0.009%,0.020%,0.002%,0.004%,0.005%,0.004%,0.003%,0.010%,0.002%,0.001%,,0.001%,0.001%,0.001%,0.002%,0.001%,0.001%,0.001%,0.002%,0.001%,0.001%,0.000%,0.001%,0.000%,,0.000%,,0.001%
+51-HCM Tan Phu/Son Ky Hub,0.004%,0.004%,0.003%,0.005%,0.018%,0.011%,0.005%,0.006%,0.009%,0.002%,0.003%,0.003%,0.003%,0.002%,0.004%,0.002%,0.002%,0.006%,0.004%,0.002%,,,,,,,,,,,,,,,
+53-HCM Bulky DC,,0.002%,0.002%,,0.002%,0.001%,0.002%,0.003%,0.003%,0.004%,0.001%,0.008%,0.002%,,,,,,,,,,,,,,,,,,,,,,
+51-HCM Binh Tan/Binh Tri Dong A Hub,0.005%,0.007%,0.004%,0.020%,0.005%,0.026%,0.020%,0.015%,0.029%,0.008%,0.010%,0.022%,0.015%,0.022%,0.023%,0.021%,0.020%,0.019%,0.011%,0.012%,0.031%,0.028%,0.008%,0.011%,0.009%,0.017%,0.013%,0.004%,0.004%,0.005%,0.004%,0.004%,0.002%,0.009%,0.007%
+51-HCM D8/Bui Minh Truc Hub,0.005%,0.010%,0.010%,0.005%,0.009%,0.007%,0.005%,0.005%,0.007%,0.002%,0.003%,0.004%,0.003%,0.003%,0.002%,0.002%,0.003%,0.002%,0.003%,0.004%,0.003%,0.007%,0.003%,0.003%,0.006%,0.002%,0.007%,0.004%,0.003%,0.001%,,,,,
+50-HCM Cu Chi Hub,0.003%,0.001%,0.002%,0.001%,0.001%,0.000%,0.005%,0.002%,0.003%,0.002%,0.002%,0.004%,0.002%,0.003%,0.003%,0.003%,0.001%,0.006%,0.004%,0.003%,0.008%,0.008%,0.008%,0.012%,0.004%,0.002%,0.001%,0.001%,0.003%,0.002%,0.005%,0.001%,0.001%,0.000%,0.001%
+50-HCM Nha Be Hub,0.001%,0.002%,0.002%,0.003%,0.005%,0.004%,0.002%,0.004%,0.003%,0.003%,0.000%,0.002%,0.001%,0.003%,0.002%,0.003%,0.011%,0.018%,0.004%,0.005%,0.004%,0.003%,0.003%,0.003%,0.002%,0.001%,0.001%,0.001%,0.001%,0.000%,0.001%,0.003%,0.003%,0.005%,0.002%
+51-HCM Thu Duc/Ngo Chi Quoc Hub,0.008%,0.011%,0.009%,0.040%,0.013%,0.013%,0.044%,0.050%,0.054%,0.015%,0.011%,0.029%,0.071%,0.073%,0.029%,0.017%,0.020%,0.015%,0.009%,0.012%,0.004%,0.007%,0.001%,,,,,,,,,,,,
+51-HCM Tan Binh/Tan Son Nhat Hub,0.004%,0.005%,0.004%,0.004%,0.003%,0.004%,0.003%,0.005%,0.004%,0.001%,0.001%,,,,,,,,,,,,,,,,,,,,,,,,
+51-HCM Phu Nhuan/Phan Xich Long Hub,0.006%,0.002%,0.003%,0.001%,0.002%,0.004%,0.001%,0.003%,0.002%,,0.002%,0.003%,0.003%,0.005%,0.001%,0.002%,0.004%,0.005%,0.002%,0.003%,0.002%,0.005%,0.002%,0.001%,0.003%,0.002%,,,,,,,,,
+51-HCM Tan Phu/Tan Son Nhi Hub,0.001%,0.001%,0.002%,0.003%,0.002%,0.000%,0.003%,0.001%,0.001%,0.005%,0.000%,0.001%,0.002%,0.001%,0.003%,0.001%,0.005%,0.004%,0.001%,,,,,,,,,,,,,,,,
+51-HCM D9/Tang Nhon Phu B Hub,0.001%,0.001%,0.001%,,0.000%,0.001%,0.001%,0.001%,0.001%,,0.002%,0.001%,0.002%,0.001%,0.003%,0.004%,0.003%,,,,,,0.001%,,,,,,,,,,,,
+51-HCM Le Hong Phong 02 CH,0.003%,0.001%,,0.001%,0.002%,,0.006%,0.008%,0.002%,0.002%,,0.003%,,,,,,,,,,,,,,,,,,,,,,,
+50-HCM Binh Chanh/Le Minh Xuan Hub,0.004%,0.006%,0.002%,0.002%,0.004%,0.006%,0.003%,0.020%,0.018%,,0.009%,0.020%,0.011%,0.011%,0.017%,0.005%,0.010%,0.004%,0.005%,0.003%,0.009%,0.024%,0.024%,0.015%,0.003%,0.003%,0.003%,0.002%,0.003%,,0.006%,,0.003%,0.052%,0.003%
+51-HCM D2/Thao Dien Hub,0.009%,0.028%,0.004%,0.006%,0.005%,0.003%,0.004%,0.004%,0.004%,0.005%,0.003%,0.002%,,0.003%,0.002%,0.001%,,,,,,,,,,,,,,,,,,,
+51-HCM Binh Chanh/Binh Hung Hub,0.004%,0.003%,0.004%,0.003%,0.003%,0.004%,0.003%,0.003%,0.005%,0.004%,0.003%,0.003%,0.006%,0.005%,0.003%,0.004%,0.007%,0.003%,0.002%,0.001%,0.002%,0.005%,0.002%,0.001%,0.001%,0.001%,0.000%,0.001%,0.002%,0.002%,,,,,
+51-HCM Binh Thanh/Phan Van Tri Hub,0.001%,0.002%,0.003%,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,
+50-HCM Thu Duc/Hiep Binh Phuoc Hub,0.002%,0.002%,0.003%,0.003%,0.004%,0.004%,0.005%,0.004%,0.008%,0.004%,0.003%,0.013%,0.007%,0.004%,0.004%,0.007%,0.011%,0.030%,0.024%,0.018%,0.033%,0.051%,0.013%,0.009%,0.007%,0.004%,0.002%,0.001%,0.000%,0.001%,0.001%,0.001%,0.001%,0.003%,0.002%
+50-HCM Binh Chanh/Tan Tuc Hub,0.002%,0.002%,0.002%,0.003%,0.004%,0.004%,0.005%,0.004%,0.006%,0.005%,0.002%,0.007%,0.005%,0.006%,0.005%,0.002%,0.002%,0.003%,0.001%,0.001%,0.002%,0.006%,0.005%,0.012%,0.011%,0.005%,0.006%,0.002%,0.002%,0.002%,0.001%,,0.002%,0.006%,0.003%
+50-HCM D9/Truong Thanh Hub,0.001%,0.000%,0.002%,0.001%,0.001%,0.001%,0.001%,0.000%,0.003%,0.002%,0.000%,0.003%,0.004%,0.002%,0.003%,0.002%,0.002%,0.002%,0.001%,0.001%,0.003%,0.005%,0.001%,0.001%,0.003%,0.002%,0.002%,0.001%,0.005%,0.002%,0.002%,0.017%,0.001%,0.003%,0.004%
+51-HCM Go Vap/Phan Huy Ich Hub,0.003%,0.005%,0.006%,0.007%,0.007%,0.008%,0.008%,0.006%,0.013%,0.005%,0.003%,0.006%,0.007%,0.005%,0.005%,0.004%,0.004%,0.003%,0.002%,0.002%,0.002%,0.004%,0.003%,0.002%,0.002%,0.001%,0.001%,0.001%,0.002%,0.002%,0.002%,0.002%,0.001%,0.004%,0.001%
+51-HCM D2/Cat Lai Hub,0.003%,0.003%,0.006%,0.001%,0.002%,0.003%,0.004%,0.002%,0.002%,0.001%,0.001%,0.002%,0.003%,0.001%,0.002%,0.000%,0.003%,0.002%,0.000%,0.002%,0.000%,0.001%,0.002%,0.001%,0.002%,0.002%,0.003%,0.000%,0.001%,0.001%,0.002%,0.002%,0.001%,0.002%,0.001%
+51-HCM Cu Chi/Trung Lap Thuong Hub,0.003%,0.002%,0.001%,,,0.002%,0.001%,0.003%,0.005%,0.002%,0.002%,0.001%,0.001%,0.001%,0.003%,0.004%,,0.004%,,0.002%,0.007%,0.017%,0.002%,0.009%,0.002%,0.003%,,0.012%,0.004%,0.002%,,,,0.002%,
+51-HCM D10/Truong Son Hub,0.006%,0.012%,0.010%,0.003%,0.008%,0.008%,0.005%,0.006%,0.006%,0.000%,,,,,,,,,,,,,,,,,,,,,,,,,
+51-HCM Tan Phu/Kenh Tan Hoa Hub,0.003%,0.004%,0.004%,0.003%,0.003%,0.006%,0.003%,0.001%,0.004%,0.004%,0.008%,0.004%,0.004%,0.012%,0.007%,0.003%,0.003%,,,,,,,,,,,,,,,,,,
+51-HCM Bay Hien/Tai Thiet Hub,0.001%,0.002%,0.002%,0.001%,0.003%,0.004%,0.002%,,,,,,,,,,,,,,,,,,,,,,,,,,,,
+51-HCM Go Vap/Phuong 15 Hub,0.003%,0.002%,0.001%,0.008%,0.001%,0.000%,0.001%,0.001%,0.001%,0.000%,0.000%,0.001%,0.001%,0.001%,0.002%,0.002%,0.001%,,,,,,,,,,,,,,,,,,
+51-HCM D8/Phu Dinh Hub,0.001%,0.005%,0.002%,0.002%,0.003%,0.003%,0.003%,0.001%,0.001%,,,,,,,,,,,,,,,,,,,,,,,,,,
+51-HCM D9/Nguyen Van Tang Hub,0.004%,0.005%,0.005%,0.006%,0.005%,0.006%,0.006%,0.005%,0.021%,0.015%,0.004%,0.006%,0.011%,0.002%,0.002%,0.002%,0.003%,0.004%,0.003%,0.004%,0.003%,0.004%,0.002%,0.001%,0.004%,0.006%,0.008%,0.023%,0.007%,,,,,,
+51-HCM Cu Chi/Tan Thanh Dong Hub,,0.004%,0.002%,0.002%,0.002%,0.003%,0.005%,0.003%,0.003%,0.004%,0.004%,0.005%,0.002%,0.001%,,0.002%,0.006%,0.007%,0.004%,0.002%,0.009%,0.058%,0.020%,0.010%,0.006%,0.024%,0.002%,0.009%,0.003%,0.001%,0.002%,0.002%,0.009%,0.027%,0.002%
+51-HCM Tan Binh/Bay Hien Hub,0.006%,0.002%,0.003%,0.002%,0.001%,0.004%,0.003%,0.004%,0.002%,0.000%,,,,,,,,,,,,,,,,,,,,,,,,,
+51-HCM D9/Hoang Huu Nam Hub,0.004%,0.002%,0.001%,0.002%,0.004%,0.004%,0.010%,0.003%,0.006%,0.001%,0.001%,0.005%,0.001%,0.004%,0.001%,0.002%,0.002%,0.003%,0.002%,0.003%,0.007%,0.004%,0.006%,0.002%,0.002%,0.004%,,0.002%,0.002%,,,,,,
+51-HCM D11/Binh Thoi Hub,0.004%,0.003%,0.003%,0.005%,0.003%,0.004%,0.004%,0.003%,0.007%,0.001%,0.002%,0.006%,0.004%,0.004%,,,,,,,,,,,,,,,,,,,,,
+51-HCM D3/Nhieu Loc Hub,0.006%,0.010%,0.005%,0.003%,0.014%,0.008%,0.003%,0.007%,0.003%,,0.001%,0.001%,,,,,,,,,,,,,,,,,,,,,,,
+50-HCM D12/Trung My Tay Hub,0.002%,0.002%,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,
+51-HCM Hoc Mon/Nguyen Thi Soc Hub,,0.001%,0.003%,0.002%,0.001%,0.002%,0.002%,0.001%,0.002%,0.007%,0.001%,0.004%,0.004%,0.003%,0.005%,0.004%,0.005%,0.002%,0.002%,0.002%,0.002%,0.004%,0.003%,0.000%,,,,,,,,,,,
+50-HCM D12/An Suong Hub,0.005%,0.004%,0.004%,0.004%,0.003%,0.004%,0.003%,0.002%,0.002%,0.004%,0.002%,0.001%,0.003%,0.003%,0.004%,0.004%,0.002%,0.001%,0.002%,0.004%,0.002%,0.008%,0.003%,0.005%,0.003%,0.003%,0.004%,0.003%,0.003%,0.002%,0.002%,0.003%,0.003%,0.004%,0.005%
+51-HCM D12/Dong Hung Thuan Hub,,,0.001%,0.000%,0.001%,0.002%,0.003%,0.001%,0.000%,0.004%,0.005%,0.002%,0.005%,0.005%,0.003%,0.002%,0.003%,0.002%,0.001%,0.003%,0.001%,0.003%,0.002%,,,,,,,,,,,,
+51-HCM Phu Nhuan/Truong Sa Hub,0.002%,0.001%,0.001%,0.002%,0.003%,0.002%,0.003%,0.002%,0.005%,0.007%,0.003%,0.001%,0.001%,0.006%,0.001%,0.001%,0.001%,0.003%,0.001%,0.002%,0.001%,0.003%,0.004%,0.001%,0.003%,,,,,,,,,,
+51-HCM Nha Be/Phuoc Kien Hub,0.019%,0.040%,0.048%,0.025%,0.017%,0.016%,0.028%,0.029%,0.033%,0.006%,0.011%,0.015%,0.005%,0.008%,0.003%,0.003%,0.006%,0.003%,0.005%,0.003%,0.005%,0.006%,0.004%,0.004%,0.002%,0.009%,0.013%,0.003%,0.002%,0.001%,0.000%,,,,0.006%
+51-HCM Go Vap/Phuong 5 Hub,0.005%,0.006%,0.002%,0.001%,0.003%,0.002%,0.001%,0.002%,0.023%,0.004%,0.003%,0.008%,0.007%,0.004%,0.005%,,,,,,,,,,,,,,,,,,,,
+51-HCM D7/Huynh Tan Phat Hub,,0.002%,0.004%,0.003%,0.001%,0.004%,0.003%,0.002%,0.002%,0.002%,0.002%,0.004%,0.003%,0.002%,0.004%,0.002%,0.004%,0.003%,0.002%,0.003%,0.002%,0.006%,0.002%,0.003%,0.002%,0.003%,0.005%,,,,,,,,
+51-HCM Binh Chanh/Vinh Loc A Hub,0.004%,0.007%,0.004%,0.009%,0.006%,0.007%,0.004%,0.009%,0.008%,0.002%,0.007%,0.057%,0.069%,0.016%,0.007%,0.004%,0.004%,0.004%,0.004%,0.005%,0.008%,0.004%,0.001%,0.002%,0.002%,0.004%,0.002%,0.001%,0.001%,0.003%,0.002%,0.004%,0.002%,0.002%,0.002%
+50-HCM Binh Tan/An Lac Hub,0.008%,0.013%,0.027%,0.012%,0.010%,0.064%,0.022%,0.022%,0.034%,0.022%,0.008%,0.014%,0.011%,0.012%,0.011%,0.012%,0.017%,0.012%,0.005%,0.005%,0.006%,0.015%,0.006%,0.005%,0.007%,0.003%,0.004%,0.002%,0.004%,0.002%,0.002%,0.003%,0.002%,0.003%,0.002%
+51-HCM D12/Le Van Khuong Hub,0.004%,0.004%,0.004%,0.003%,0.005%,0.009%,0.007%,0.007%,0.010%,0.012%,0.008%,0.008%,0.009%,0.009%,0.005%,0.003%,0.002%,0.002%,,0.002%,0.002%,0.002%,0.002%,0.001%,0.000%,,,,,,,,,,
+50-HCM D2 Hub,0.001%,0.000%,0.001%,0.001%,0.002%,0.001%,0.000%,0.001%,0.001%,,0.000%,0.001%,0.001%,,0.001%,,0.000%,0.001%,0.000%,,,0.001%,0.001%,0.001%,0.000%,0.002%,0.001%,0.012%,0.001%,,0.003%,,0.001%,0.001%,0.000%
+51-HCM D3/Ban Co Hub,0.005%,0.004%,0.003%,0.002%,0.001%,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,
+53-HCM Bulky 02 DC,0.005%,0.004%,0.001%,,0.001%,0.001%,,,,,,,,,,,,,,,,,,,,,,,,,,,,,
+51-HCM D9/Long Truong Hub,,0.003%,0.003%,0.002%,0.002%,0.002%,0.000%,0.001%,0.003%,0.005%,0.005%,0.011%,,,,,,,,,,,,,,,,,,,,,,,
+54-HCM FM 01 Hub,0.002%,0.007%,0.009%,0.002%,0.001%,0.001%,,,,,,,,,,,,,,,,,,,,,,,,,,,,,
+51-HCM D8/KDC Binh Hung Hub,0.010%,0.009%,0.010%,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,
+51-HCM Hoc Mon/Thi Tran Hub,0.001%,0.006%,0.002%,0.001%,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,
+51-HCM D2/An Khanh Hub,0.002%,0.002%,0.003%,0.002%,0.004%,0.002%,0.001%,0.000%,0.002%,0.002%,0.001%,0.001%,0.001%,0.002%,0.001%,0.003%,0.001%,0.003%,0.001%,0.001%,,0.003%,0.004%,0.003%,0.003%,0.007%,0.003%,0.001%,0.001%,,,,,,
+50-HCM D7 Hub,0.005%,0.012%,0.008%,0.008%,0.010%,0.008%,0.011%,0.016%,0.016%,0.005%,0.003%,0.006%,0.006%,0.003%,0.003%,0.002%,0.003%,0.002%,0.001%,0.002%,0.002%,0.005%,0.004%,0.002%,0.001%,0.001%,0.001%,0.001%,0.002%,0.002%,0.001%,0.002%,0.002%,0.003%,0.002%
+51-HCM D6/Phuong 10 Hub,,,,21.429%,0.005%,0.011%,0.007%,0.011%,0.013%,0.010%,0.011%,0.020%,0.014%,0.011%,0.015%,0.014%,0.007%,0.003%,0.006%,0.008%,0.007%,0.009%,0.006%,0.005%,0.004%,0.002%,0.002%,0.002%,0.002%,0.001%,0.001%,0.001%,,,
+51-HCM Le Hong Phong CH,,,,,0.003%,0.003%,0.001%,0.002%,0.004%,,0.004%,,0.013%,0.010%,,,,,,,,,,,,,,,,,,,,,
+50-HCM Go Vap/Quang Trung Hub,,,,0.004%,0.003%,0.003%,0.004%,0.004%,0.005%,0.005%,0.003%,0.005%,0.004%,0.004%,0.004%,0.003%,0.004%,0.003%,0.003%,0.004%,0.005%,0.007%,0.004%,0.005%,0.006%,0.006%,0.006%,0.005%,0.005%,0.004%,0.002%,0.005%,0.008%,0.011%,0.009%
+50-HCM Binh Thanh Hub,,,,,0.026%,0.028%,0.029%,0.022%,0.018%,0.008%,0.015%,0.017%,0.010%,0.014%,0.008%,0.008%,0.011%,0.007%,0.003%,0.008%,0.009%,0.004%,0.003%,0.005%,0.007%,0.003%,0.005%,0.002%,0.002%,0.003%,0.002%,0.001%,0.002%,0.001%,0.003%
+51-HCM D12/Thanh Loc 02 Hub,,,,,,266.667%,0.005%,0.011%,0.070%,0.108%,0.188%,0.090%,0.001%,,,,,,,,,,,,,,,,,,,,,,`;
+
+function flmFindSheetByKeyword_(ss,keywords){
+  if(!ss)return null;
+  const sheets=ss.getSheets();
+  for(let i=0;i<sheets.length;i++){
+    const name=sheets[i].getName().toLowerCase();
+    for(let j=0;j<keywords.length;j++){
+      if(name.indexOf(keywords[j].toLowerCase())>=0)return sheets[i];
+    }
+  }
+  return null;
+}
+function flmFindDateColIdx_(sheet){
+  if(!sheet||sheet.getLastRow()<1)return 0;
+  const headers=sheet.getRange(1,1,1,Math.min(sheet.getLastColumn(),15)).getValues()[0].map(h=>String(h||'').trim().toLowerCase());
+  const idx=headers.findIndex(h=>['date','ngày','deadline','report_date','d'].some(kw=>h.indexOf(kw)>=0));
+  return idx>=0?idx:0;
+}
+function flmSheetDateStats_(sheet,colDateIdx){
+  const lastRow=sheet.getLastRow();
+  if(lastRow<=1)return {dates:[],latestDate:null,rows:0};
+  const cacheKey='flm:sheet_date_stats:v3:'+sheet.getName()+':'+lastRow+':'+colDateIdx;
+  const cached=flmCacheGet_(cacheKey);
+  if(cached&&cached.dates)return cached;
+  const dateSet=new Set();let latest='',validRows=0;
+  const chunkValues=sheet.getRange(2,colDateIdx+1,lastRow-1,1).getValues();
+  for(let i=0;i<chunkValues.length;i++){
+    const raw=chunkValues[i][0];if(raw==null||raw==='')continue;
+      let d='';
+      if(raw instanceof Date){
+        d=Utilities.formatDate(raw,'Asia/Ho_Chi_Minh','yyyy-MM-dd');
+      }else if(typeof raw==='number'&&raw>30000&&raw<60000){
+        const dt=new Date(Math.round((raw-25569)*86400*1000));
+        d=Utilities.formatDate(dt,'Asia/Ho_Chi_Minh','yyyy-MM-dd');
+      }else{
+        const s=String(raw||'').trim();
+        if(/^\d{4}-\d{2}-\d{2}/.test(s))d=s.slice(0,10);
+        else{
+          const m=/^(\d{1,2})[\/\-](\d{1,2})[\/\-](\d{4})/.exec(s);
+          if(m)d=m[3]+'-'+m[2].padStart(2,'0')+'-'+m[1].padStart(2,'0');
+        }
+      }
+      if(/^\d{4}-\d{2}-\d{2}$/.test(d)){dateSet.add(d);if(d>latest)latest=d;validRows++;}
+  }
+  const dates=Array.from(dateSet).sort();
+  const res={dates:dates,latestDate:latest||null,rows:validRows};
+  flmCachePut_(cacheKey,res,3600);
+  return res;
+}
+function flmReadClaimsSheetMaster_(ss,anchor,masterMap,tabKey){
+  const isAll=!tabKey||tabKey==='all'||tabKey==='claims'||tabKey==='risk';
+  const alertPivot=(isAll||tabKey==='alert')?(ss.getSheetByName('ALERT_PIVOT')||flmFindSheetByKeyword_(ss,['alert_pivot','alert pivot','alert_summary','alert_agg'])):null;
+  const urgentPivot=(isAll||tabKey==='urgent')?(ss.getSheetByName('URGENT_PIVOT')||flmFindSheetByKeyword_(ss,['urgent_pivot','urgent pivot','prelost_pivot','prelost pivot','urgent_summary'])):null;
+  const alertSheet=(isAll||tabKey==='alert')&&!alertPivot&&flmFindSheetByKeyword_(ss,['[alert]','cần xử lý']);
+  const urgentSheet=(isAll||tabKey==='urgent')&&!urgentPivot&&flmFindSheetByKeyword_(ss,['[urgent]','bắt buộc feedback']);
+  if(!alertSheet&&!urgentSheet&&!alertPivot&&!urgentPivot)return null;
+  const metadata=[],groups=[];
+  function processPivotSheet(sheet,source){
+    if(!sheet||sheet.getLastRow()<=1)return false;
+    const allValues=sheet.getDataRange().getValues();
+    if(allValues.length<=1)return false;
+    const firstVal=allValues[0][0];
+    const hasHeader=!(firstVal instanceof Date)&&!/^\d{4}-\d{2}-\d{2}/.test(String(firstVal||'').trim());
+    const startIdx=hasHeader?1:0;
+    const headers=hasHeader?allValues[0].map(h=>String(h||'').trim().toLowerCase()):[];
+    const findCol=(kws,def)=>{if(!headers.length)return def;const idx=headers.findIndex(h=>kws.some(kw=>h.indexOf(kw)>=0));return idx>=0?idx:def};
+    const cDate=findCol(['date','ngày','deadline'],0);
+    const cStation=findCol(['station','hub','trạm','fleet_final_station'],1);
+    const cAging=findCol(['aging','tuổi'],2);
+    const cStage=findCol(['stage','status','yêu cầu'],3);
+    const cFb=findCol(['feedback','phản hồi'],-1);
+    const cHv=findCol(['hv','high_value','high value'],-1);
+    const cN=findCol(['orders','count','records','số lượng','qty','sl'],4);
+    const cCogs=findCol(['cogs','amount','amt','tiền','sum'],5);
+
+    const dateSet=new Set();let latestDate='';
+    const rowDates=new Array(allValues.length);
+    for(let i=startIdx;i<allValues.length;i++){
+      const rawDate=allValues[i][cDate];let d='';
+      if(rawDate instanceof Date)d=Utilities.formatDate(rawDate,'Asia/Ho_Chi_Minh','yyyy-MM-dd');
+      else if(typeof rawDate==='number'&&rawDate>30000&&rawDate<60000){
+        d=Utilities.formatDate(new Date(Math.round((rawDate-25569)*86400*1000)),'Asia/Ho_Chi_Minh','yyyy-MM-dd');
+      }else{
+        const s=String(rawDate||'').trim();
+        if(/^\d{4}-\d{2}-\d{2}/.test(s))d=s.slice(0,10);
+        else{
+          const m=/^(\d{1,2})[\/\-](\d{1,2})[\/\-](\d{4})/.exec(s);
+          if(m)d=m[3]+'-'+m[2].padStart(2,'0')+'-'+m[1].padStart(2,'0');
+        }
+      }
+      rowDates[i]=d;
+      if(/^\d{4}-\d{2}-\d{2}$/.test(d)){dateSet.add(d);if(d>latestDate)latestDate=d;}
+    }
+    const targetDate=dateSet.has(anchor)?anchor:latestDate;
+    if(!targetDate)return false;
+    metadata.push({row_kind:'meta',source:source,snapshot_date:targetDate,ingested_at:targetDate+'T23:00:00+07:00',requested_available:true});
+    const grouped={};
+    for(let i=startIdx;i<allValues.length;i++){
+      if(rowDates[i]!==targetDate)continue;
+      const row=allValues[i];
+      const stationRaw=String(row[cStation]||'').trim(),code=flmMatchHubCode_(stationRaw,masterMap);
+      if(!code)continue;
+      const n=Math.round(Number(cN>=0?row[cN]:1));
+      if(!Number.isSafeInteger(n)||n<1)continue;
+      const agingVal=cAging>=0?row[cAging]:null;let groupAging='Chưa có aging';
+      if(agingVal!=null&&agingVal!==''){const nDays=Number(agingVal);groupAging=isFinite(nDays)?(nDays<=3?'0-3 days':nDays<=7?'4-7 days':nDays<=14?'8-14 days':'>14 days'):String(agingVal);}
+      const stage=cStage>=0&&row[cStage]?String(row[cStage]).trim():'UNKNOWN';
+      const cogsVal=cCogs>=0?row[cCogs]:null,cogsNum=flmTeamNum_(cogsVal),isMissing=cogsVal==null||String(cogsVal).trim()==='';
+      const hvVal=cHv>=0?String(row[cHv]||'').toLowerCase():'';
+      const isHv=cHv>=0?(hvVal==='hv'||hvVal==='true'||hvVal==='1'):((cogsNum!=null&&cogsNum>=1000000)||stage.indexOf('GTC')>=0);
+      const fbRaw=cFb>=0&&row[cFb]?String(row[cFb]).trim():'',feedback=!fbRaw?'Chưa phản hồi':/done|xác nhận|chuyển|đối soát/i.test(fbRaw)?'Đã phản hồi':fbRaw;
+      const groupKey=stationRaw+'|'+groupAging+'|'+stage+'|'+isHv+'|'+feedback;
+      if(!grouped[groupKey])grouped[groupKey]={row_kind:'group',source:source,hubCode:code,station:stationRaw,group_aging:groupAging,stage:stage,high_value:isHv,feedback:feedback,snapshot_date:targetDate,n:0,cogs:0,missing_cogs:0,max_duplicate:1};
+      const g=grouped[groupKey];g.n+=n;if(isMissing)g.missing_cogs+=n;else g.cogs+=(cogsNum||0);
+    }
+    Object.values(grouped).forEach(g=>{groups.push(g);});
+    return true;
+  }
+  function processSheet(sheet,source,colDateIdx,colStationIdx,colShipIdx,colAgingIdx,colCogsIdx,colStageIdx,colFbIdx){
+    if(!sheet||sheet.getLastRow()<=1)return;
+    const lastCol=Math.min(sheet.getLastColumn(),15);
+    const headers=sheet.getRange(1,1,1,lastCol).getValues()[0].map(h=>String(h||'').trim().toLowerCase());
+    const findCol=(kws,def)=>{if(!headers.length)return def;const idx=headers.findIndex(h=>kws.some(kw=>h.indexOf(kw)>=0));return idx>=0?idx:def};
+    const cDate=findCol(['date','deadline'],colDateIdx),cStation=findCol(['fleet_final_station','station','hub'],colStationIdx),cShip=findCol(['spx_shipment_id','shipment_id'],colShipIdx),cAging=findCol(['aging'],colAgingIdx),cCogs=findCol(['cogs','amt'],colCogsIdx),cStage=findCol(['fleet_final_status','yêu cầu','stage'],colStageIdx),cFb=findCol(['phản hồi','feedback'],colFbIdx);
+    const numCols=Math.max(cDate,cStation,cShip,cAging,cCogs,cStage,cFb)+1;
+    const stats=flmSheetDateStats_(sheet,cDate);
+    const targetDate=(stats.dates||[]).indexOf(anchor)>=0?anchor:stats.latestDate;
+    if(!targetDate)return;
+    metadata.push({row_kind:'meta',source:source,snapshot_date:targetDate,ingested_at:targetDate?targetDate+'T23:00:00+07:00':null,requested_available:true});
+    const lastRow=sheet.getLastRow(),CHUNK_SIZE=500;
+    const grouped={},seenShipments=new Set();let maxDup=1;
+    function processRow(row){
+      const rawDate=row[cDate];let d='';
+      if(rawDate instanceof Date)d=Utilities.formatDate(rawDate,'Asia/Ho_Chi_Minh','yyyy-MM-dd');
+      else if(typeof rawDate==='number'&&rawDate>30000&&rawDate<60000){const dt=new Date(Math.round((rawDate-25569)*86400*1000));d=Utilities.formatDate(dt,'Asia/Ho_Chi_Minh','yyyy-MM-dd');}
+      else d=String(rawDate||'').slice(0,10);
+      if(d!==targetDate)return d;
+      const stationRaw=String(row[cStation]||'').trim(),code=flmMatchHubCode_(stationRaw,masterMap);
+      if(!code)return d;
+      const shipId=cShip>=0?String(row[cShip]||'').trim():'';
+      const isValidShipId=shipId&&shipId!=='-'&&shipId.toLowerCase()!=='n/a'&&shipId!=='0';
+      if(isValidShipId){
+        const dupKey=source+'|'+targetDate+'|'+code+'|'+shipId;
+        if(seenShipments.has(dupKey)) return d;
+        seenShipments.add(dupKey);
+      }
+      const agingVal=cAging>=0?row[cAging]:null;let groupAging='Chưa có aging';
+      if(agingVal!=null&&agingVal!==''){const nDays=Number(agingVal);groupAging=isFinite(nDays)?(nDays<=3?'0-3 days':nDays<=7?'4-7 days':nDays<=14?'8-14 days':'>14 days'):String(agingVal);}
+      const stage=cStage>=0&&row[cStage]?String(row[cStage]).trim():'UNKNOWN',cogsVal=cCogs>=0?row[cCogs]:null,cogsNum=flmTeamNum_(cogsVal),isMissing=cogsVal==null||String(cogsVal).trim()==='';
+      const isHv=(cogsNum!=null&&cogsNum>=1000000)||stage.indexOf('GTC')>=0;
+      const fbRaw=cFb>=0&&row[cFb]?String(row[cFb]).trim():'',feedback=!fbRaw?'Chưa phản hồi':/done|xác nhận|chuyển|đối soát/i.test(fbRaw)?'Đã phản hồi':fbRaw;
+      const groupKey=stationRaw+'|'+groupAging+'|'+stage+'|'+isHv+'|'+feedback;
+      if(!grouped[groupKey])grouped[groupKey]={row_kind:'group',source:source,hubCode:code,station:stationRaw,group_aging:groupAging,stage:stage,high_value:isHv,feedback:feedback,snapshot_date:targetDate,n:0,cogs:0,missing_cogs:0,max_duplicate:1};
+      const g=grouped[groupKey];g.n++;if(isMissing)g.missing_cogs++;else g.cogs+=(cogsNum||0);
+      return d;
+    }
+    if(lastRow>=2){
+      const allRows=sheet.getRange(2,1,lastRow-1,numCols).getValues();
+      for(let i=0;i<allRows.length;i++)processRow(allRows[i]);
+    }
+    Object.values(grouped).forEach(g=>{g.max_duplicate=maxDup;groups.push(g);});
+  }
+  function flmIsPivotSheet_(sheet){
+    if(!sheet||sheet.getLastRow()<=1)return false;
+    const lastCol=Math.min(sheet.getLastColumn(),15);
+    const headers=sheet.getRange(1,1,1,lastCol).getValues()[0].map(h=>String(h||'').trim().toLowerCase());
+    return headers.some(h=>['orders','records','count','số lượng','qty','sl'].some(kw=>h.indexOf(kw)>=0));
+  }
+  let alertDone=false;
+  if(alertPivot)alertDone=processPivotSheet(alertPivot,'alert');
+  if(!alertDone&&alertSheet){
+    if(flmIsPivotSheet_(alertSheet))alertDone=processPivotSheet(alertSheet,'alert');
+    else processSheet(alertSheet,'alert',0,3,2,4,5,7,-1);
+  }
+  let urgentDone=false;
+  if(urgentPivot)urgentDone=processPivotSheet(urgentPivot,'urgent');
+  if(!urgentDone&&urgentSheet){
+    if(flmIsPivotSheet_(urgentSheet))urgentDone=processPivotSheet(urgentSheet,'urgent');
+    else processSheet(urgentSheet,'urgent',0,3,2,4,5,7,-1);
+  }
+  return {metadata:metadata,groups:groups};
+}
+function flmTeamClaimsFromSheet_(ctx,ssOptional,requestedTab){
+  const tabKey=requestedTab||ctx.tab||'all';
+  const masterKey='flm:claims-master:v3:'+ctx.anchor+':'+tabKey;
+  let master=null;
+  if(!ctx.force)master=flmCacheGet_(masterKey);
+  if(!master||!master.groups||!master.groups.length){
+    if(typeof SpreadsheetApp==='undefined')return null;
+    let ss=ssOptional;
+    if(!ss){try{ss=SpreadsheetApp.openById(flmTeamLostDbSheetId_())}catch(err){throw Error('CANNOT_OPEN_GSHEET ('+flmTeamLostDbSheetId_()+'): '+String(err.message||err));}}
+    if(!ss)return null;
+    const masterMap=flmMasterHubMap_();
+    master=flmReadClaimsSheetMaster_(ss,ctx.anchor,masterMap,tabKey);
+    if(master&&master.groups&&master.groups.length)flmCachePut_(masterKey,master,3600);
+  }
+  if(!master||!master.metadata||!master.metadata.length)return null;
+  return flmTeamClaimsBuild_(master.groups,master.metadata,ctx);
+}
+
+function flmTeamGetHubOrders(request){
+  const r=request||{};
+  const hubCode=String(r.hubCode||'').trim();
+  if(!hubCode)throw Error('FLM_HUB_CODE_REQUIRED');
+  const ctx=flmTeamContext_('compensated',r);
+  const allowed=new Set((ctx.codes||[]).map(String));
+  if(!allowed.has(hubCode))throw Error('HUB_ACCESS_DENIED');
+  const info=ctx.byCode[hubCode]||{};
+  const stationName=info.hubName||info.stationName||hubCode;
+  const masterMap=flmMasterHubMap_();
+  
+  const cacheKey='flm:hub-orders:v2:'+ctx.anchor+':'+hubCode;
+  if(!r.force){
+    const cached=flmCacheGet_(cacheKey);
+    if(cached)return cached;
+  }
+  
+  let ss=null;
+  try{if(typeof SpreadsheetApp!=='undefined')ss=SpreadsheetApp.openById(flmTeamLostDbSheetId_());}catch(_){}
+  
+  const lostList=[];
+  const urgentList=[];
+  const alertList=[];
+  
+  if(ss){
+    try{
+      const lostSheet=ss.getSheetByName('LOST')||flmFindSheetByKeyword_(ss,['lost','mất']);
+      if(lostSheet&&lostSheet.getLastRow()>1){
+        const lastCol=Math.min(lostSheet.getLastColumn(),15);
+        const headers=lostSheet.getRange(1,1,1,lastCol).getValues()[0].map(h=>String(h||'').trim().toLowerCase());
+        const findCol=(kws,def)=>{const idx=headers.findIndex(h=>kws.some(kw=>h.indexOf(kw)>=0));return idx>=0?idx:def};
+        const cDate=findCol(['report_date','date','ngày','ngay'],0);
+        const cStation=findCol(['station','hub','trạm','tram','fleet_final_station'],1);
+        const cAmt=findCol(['amount','cogs','amt','tiền','tien'],10);
+        const cReason=findCol(['reason','lý do','ly do'],6);
+        const cShip=findCol(['shipment','tracking','đơn','don','spx_shipment_id','shipment_id'],5);
+        
+        const lastRow=lostSheet.getLastRow();
+        const numCols=Math.max(cDate,cStation,cAmt,cReason,cShip)+1;
+        const monthStart=ctx.closing.slice(0,7)+'-01',minDate=monthStart<ctx.from?monthStart:ctx.from;
+        
+        if(lastRow>=2){
+          const chunkValues=lostSheet.getRange(2,1,lastRow-1,numCols).getValues();
+          for(let i=0;i<chunkValues.length;i++){
+            const row=chunkValues[i];
+            const rawDate=row[cDate];let d='';
+            if(rawDate instanceof Date)d=Utilities.formatDate(rawDate,'Asia/Ho_Chi_Minh','yyyy-MM-dd');
+            else if(typeof rawDate==='number'&&rawDate>30000&&rawDate<60000){
+              d=Utilities.formatDate(new Date(Math.round((rawDate-25569)*86400*1000)),'Asia/Ho_Chi_Minh','yyyy-MM-dd');
+            }else{
+              const s=String(rawDate||'').trim();
+              if(/^\d{4}-\d{2}-\d{2}/.test(s))d=s.slice(0,10);
+              else{
+                const m=/^(\d{1,2})[\/\-](\d{1,2})[\/\-](\d{4})/.exec(s);
+                if(m)d=m[3]+'-'+m[2].padStart(2,'0')+'-'+m[1].padStart(2,'0');
+              }
+            }
+            if(!d||d<minDate||d>ctx.closing)continue;
+            const stationRaw=String(row[cStation]||'').trim();
+            const code=flmMatchHubCode_(stationRaw,masterMap);
+            if(code!==hubCode)continue;
+            const shipId=cShip>=0?String(row[cShip]||'').trim():'—';
+            const reason=cReason>=0&&row[cReason]?String(row[cReason]):'Chưa ghi lý do';
+            const amt=cAmt>=0?flmTeamNum_(row[cAmt]):null;
+            lostList.push({shipmentId:shipId,date:d,reason:reason,amount:amt});
+            if(lostList.length>=1000)break;
+          }
+        }
+      }
+    }catch(_){}
+    
+    function readClaimOrders(sheetKeywords,list){
+      try{
+        const sheet=flmFindSheetByKeyword_(ss,sheetKeywords);
+        if(!sheet||sheet.getLastRow()<=1)return;
+        const lastCol=Math.min(sheet.getLastColumn(),15);
+        const headers=sheet.getRange(1,1,1,lastCol).getValues()[0].map(h=>String(h||'').trim().toLowerCase());
+        const findCol=(kws,def)=>{const idx=headers.findIndex(h=>kws.some(kw=>h.indexOf(kw)>=0));return idx>=0?idx:def};
+        const cDate=findCol(['date','deadline','ngày'],0);
+        const cStation=findCol(['fleet_final_station','station','hub','trạm'],1);
+        const cShip=findCol(['spx_shipment_id','shipment_id','tracking','mã đơn','đơn'],-1);
+        const cAging=findCol(['aging','tuổi'],2);
+        const cCogs=findCol(['cogs','amt','amount','tiền'],3);
+        const cStage=findCol(['fleet_final_status','yêu cầu','stage','status'],4);
+        const cFb=findCol(['phản hồi','feedback'],-1);
+        const cHv=findCol(['hv','high_value','high value'],-1);
+        
+        const lastRow=sheet.getLastRow();
+        const numCols=Math.max(cDate,cStation,cShip,cAging,cCogs,cStage,cFb,cHv)+1;
+        
+        if(lastRow>=2){
+          const chunkValues=sheet.getRange(2,1,lastRow-1,numCols).getValues();
+          for(let i=0;i<chunkValues.length;i++){
+            const row=chunkValues[i];
+            const stationRaw=String(row[cStation]||'').trim();
+            const code=flmMatchHubCode_(stationRaw,masterMap);
+            if(code!==hubCode)continue;
+            const rawDate=row[cDate];let d='';
+            if(rawDate instanceof Date)d=Utilities.formatDate(rawDate,'Asia/Ho_Chi_Minh','yyyy-MM-dd');
+            else if(typeof rawDate==='number'&&rawDate>30000&&rawDate<60000){
+              d=Utilities.formatDate(new Date(Math.round((rawDate-25569)*86400*1000)),'Asia/Ho_Chi_Minh','yyyy-MM-dd');
+            }else d=String(rawDate||'').slice(0,10);
+            const shipId=cShip>=0?String(row[cShip]||'').trim():'—';
+            const agingVal=cAging>=0?row[cAging]:null;let groupAging='Chưa có aging';
+            if(agingVal!=null&&agingVal!==''){const nDays=Number(agingVal);groupAging=isFinite(nDays)?(nDays<=3?'0-3 days':nDays<=7?'4-7 days':nDays<=14?'8-14 days':'>14 days'):String(agingVal);}
+            const stage=cStage>=0&&row[cStage]?String(row[cStage]).trim():'UNKNOWN';
+            const cogsVal=cCogs>=0?row[cCogs]:null,cogsNum=flmTeamNum_(cogsVal);
+            const isHv=cHv>=0?String(row[cHv]||'').toLowerCase()==='hv'||row[cHv]===true:((cogsNum!=null&&cogsNum>=1000000)||stage.indexOf('GTC')>=0);
+            const fbRaw=cFb>=0&&row[cFb]?String(row[cFb]).trim():'',feedback=!fbRaw?'Chưa phản hồi':/done|xác nhận|chuyển|đối soát/i.test(fbRaw)?'Đã phản hồi':fbRaw;
+            list.push({shipmentId:shipId,date:d,aging:groupAging,stage:stage,cogs:cogsNum,highValue:isHv,feedback:feedback});
+            if(list.length>=500)break;
+          }
+        }
+      }catch(_){}
+    }
+    
+    readClaimOrders(['[urgent]','urgent','prelost'],urgentList);
+    readClaimOrders(['[alert]','alert','cần xử lý'],alertList);
+  }
+  
+  // Fallback 1: check cached master rows for lost
+  if(lostList.length===0){
+    try{
+      const masterRows=flmCacheGet_('flm:lost-master-rows:v3:'+ctx.closing+':'+ctx.from);
+      if(masterRows&&masterRows.length){
+        masterRows.forEach(r=>{
+          if(r.hubCode===hubCode){
+            lostList.push({shipmentId:'—',date:r.d,reason:r.reason+(r.n>1?' ('+r.n+' đơn)':''),amount:r.amount,count:r.n});
+          }
+        });
+      }
+    }catch(_){}
+  }
+  
+  // Fallback 2: BigQuery / Mock
+  if(lostList.length===0){
+    try{
+      const bqSql='SELECT TO_JSON_STRING(t) FROM (SELECT shipment_id, d, amt, reason, station FROM '+flmTeamTable_('flm_lost_current')+' WHERE mapped AND d BETWEEN @from AND @closing AND '+flmTeamStationSql_('station')+' ORDER BY d DESC LIMIT 1000) t';
+      const bqRows=flmTeamQuery_(bqSql,ctx);
+      bqRows.forEach(r=>{
+        const code=flmMatchHubCode_(r.station,masterMap);
+        if(code===hubCode){
+          lostList.push({shipmentId:r.shipment_id||('SPX'+String(hubCode).replace(/\D/g,'')+(r.d||'').replace(/-/g,'')),date:r.d,reason:r.reason||'Chưa ghi lý do',amount:r.amount||r.amt});
+        }
+      });
+    }catch(_){}
+  }
+  
+  if(urgentList.length===0&&alertList.length===0){
+    try{
+      const claimSql='SELECT TO_JSON_STRING(t) FROM (SELECT source, station, shipment_id, snapshot_date, group_aging, stage, cogs, high_value, feedback FROM '+flmTeamTable_('flm_claim_current')+' WHERE snapshot_date = @anchor AND '+flmTeamStationSql_('station')+' LIMIT 1000) t';
+      const cRows=flmTeamQuery_(claimSql,ctx);
+      cRows.forEach(r=>{
+        const code=flmMatchHubCode_(r.station,masterMap);
+        if(code===hubCode){
+          const item={shipmentId:r.shipment_id||('SPX'+String(hubCode).replace(/\D/g,'')+(r.snapshot_date||'').replace(/-/g,'')),date:r.snapshot_date||ctx.anchor,aging:r.group_aging||'0-3 days',stage:r.stage||'UNKNOWN',cogs:r.cogs||0,highValue:!!r.high_value,feedback:r.feedback||'Chưa phản hồi'};
+          if(r.source==='urgent')urgentList.push(item);
+          else if(r.source==='alert')alertList.push(item);
+        }
+      });
+    }catch(_){}
+  }
+  
+  lostList.sort((a,b)=>(b.amount||0)-(a.amount||0)||(b.date||'').localeCompare(a.date||''));
+  urgentList.sort((a,b)=>(b.cogs||0)-(a.cogs||0)||(b.date||'').localeCompare(a.date||''));
+  alertList.sort((a,b)=>(b.cogs||0)-(a.cogs||0)||(b.date||'').localeCompare(a.date||''));
+  
+  const result={
+    ok:true,
+    hubCode:hubCode,
+    hubName:stationName,
+    asOf:ctx.anchor,
+    closingDate:ctx.closing,
+    lost:lostList,
+    urgent:urgentList,
+    alert:alertList
+  };
+  flmCachePut_(cacheKey,result,3600);
+  return result;
+}
+
+function flmBenchmarkPing(){
+  return { ok: true, timestamp: Date.now() };
 }

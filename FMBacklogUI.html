@@ -1,0 +1,325 @@
+<style>
+/* FM ledger: one identity column + at most six measures. The table owns its scroll;
+   no offset depends on the width of another sticky cell. Two panels stack, sharing
+   the full available width and a single 16px gutter. */
+/* Inherit the operations theme so FM follows the surrounding site in both themes. */
+.fmt-wrap{--fmt-surface:var(--ops-paper,#fff);--fmt-line:var(--ops-line,#dce4ed);--fmt-rule:#edf1f6;--fmt-ink:var(--ops-ink,#203950);--fmt-muted:var(--ops-muted,#53677b);--fmt-hover:var(--ops-soft,#f3f6fa);--fmt-blue:var(--ops-blue,#31658c);--fmt-red:#dc2626;--fmt-green:#15803d;--fmt-red-soft:#fef2f2;--fmt-green-soft:#f0fdf4;--fmt-amber:#b45309;--fmt-orange:#c2410c;--fmt-total-bg:rgba(49,101,140,0.06);--fmt-risk-bg:rgba(220,38,38,0.05);display:flex;flex-direction:column;gap:16px;min-width:0;margin:0 0 24px;color:var(--fmt-ink);font-family:inherit;font-size:14px;line-height:1.5;font-variant-numeric:tabular-nums}
+.design-dark .fmt-wrap{--fmt-rule:#2c4055;--fmt-red:#f87171;--fmt-green:#4ade80;--fmt-red-soft:#451a1a;--fmt-green-soft:#143823;--fmt-amber:#fbbf24;--fmt-orange:#fb923c;--fmt-total-bg:rgba(164,201,233,0.1);--fmt-risk-bg:rgba(248,113,113,0.12)}
+.fmt-wrap *{box-sizing:border-box}
+.fmt-wrap button,.fmt-wrap input,.fmt-wrap select{font:inherit;color:var(--fmt-ink)}
+.fmt-wrap button{cursor:pointer}
+.fmt-wrap button:disabled{cursor:default;color:var(--fmt-muted);opacity:.6}
+.fmt-wrap :is(button,input,select,a):focus-visible{outline:2px solid var(--fmt-blue);outline-offset:3px}
+.fmt-subnav{display:flex;gap:24px;border-bottom:1px solid var(--fmt-line);overflow-x:auto}
+.fmt-nav-row{display:flex;align-items:center;justify-content:space-between;gap:16px;flex-wrap:wrap}
+.fmt-nav-row .fmt-subnav{min-width:0;flex:1}
+.fmt-raw-link{display:inline-flex;align-items:center;min-height:40px;flex:none;color:var(--fmt-ink);font-size:13px;text-decoration:none;border-bottom:1px solid var(--fmt-line)}
+.fmt-raw-link:hover{color:var(--fmt-blue);text-decoration:underline;text-underline-offset:4px}
+.fmt-subnav-btn{flex:none;border:0;border-bottom:2px solid transparent;background:transparent;color:var(--fmt-muted)!important;padding:10px 0;font-size:14px!important;white-space:nowrap}
+.fmt-subnav-btn:hover{color:var(--fmt-ink)!important}
+.fmt-subnav-btn.is-active{border-bottom-color:var(--fmt-blue);color:var(--fmt-blue)!important;font-weight:650}
+.fmt-heading{display:flex;align-items:flex-start;justify-content:space-between;gap:16px}
+.fmt-heading h2{margin:2px 0 6px;font-size:24px;line-height:1.3;font-weight:650;letter-spacing:-.02em;color:var(--fmt-ink)}
+.fmt-heading p,.fmt-panel-head p{margin:0;color:var(--fmt-muted);font-size:13px;line-height:1.6}
+.fmt-eyebrow{color:var(--fmt-muted);font-size:12px}
+.fmt-btn{min-height:44px;padding:10px 14px;border:1px solid var(--fmt-line);border-radius:7px;background:var(--fmt-surface);white-space:nowrap;font-size:12px!important;font-weight:600}
+.fmt-btn:hover:not(:disabled){background:var(--fmt-hover);border-color:var(--fmt-muted)}
+.fmt-btn-primary{color:var(--fmt-ink)!important}
+.fmt-btn-primary:hover:not(:disabled){background:var(--fmt-hover);border-color:var(--fmt-blue)}
+.fmt-snapshot{display:flex;gap:6px 20px;flex-wrap:wrap;padding:10px 14px;border:1px solid var(--fmt-line);border-radius:6px;color:var(--fmt-muted);font-size:12px;background:var(--fmt-surface)}
+.fmt-snapshot b{color:var(--fmt-ink);font-weight:500}
+.fmt-metrics{display:grid;grid-template-columns:1.3fr 1fr 1fr 1fr;border:1px solid var(--fmt-line);border-radius:8px;background:var(--fmt-surface);overflow:hidden}
+.fmt-metric{padding:16px 20px;min-width:0;border-left:1px solid var(--fmt-line)}
+.fmt-metric:first-child{border-left:0}
+.fmt-metric>span,.fmt-metric small{display:block;font-size:12px;color:var(--fmt-muted)}
+.fmt-metric strong{display:block;font-size:24px;line-height:1.5;font-weight:650;color:var(--fmt-ink)}
+.fmt-metric:first-child strong{font-size:32px}
+.fmt-toolbar{display:flex;align-items:flex-end;flex-wrap:wrap;gap:12px}
+.fmt-wrap .fmt-field{display:flex;flex-direction:column;gap:6px;color:var(--fmt-ink);font-size:13px;font-weight:600}
+.fmt-field :is(input,select){height:44px;min-height:44px;background:var(--fmt-surface);border:1.5px solid var(--fmt-line);border-radius:8px;padding:0 14px;min-width:135px;font-size:13.5px;color:var(--fmt-ink);transition:border-color .15s ease,box-shadow .15s ease}
+.fmt-field input:focus{border-color:var(--fmt-blue);box-shadow:0 0 0 3px rgba(49,101,140,0.18);outline:none}
+.fmt-field input::placeholder{color:var(--fmt-muted);opacity:1}
+.fmt-field input{width:280px;max-width:100%}
+.fmt-toolbar>.fmt-field:last-of-type{margin-right:auto}
+.fmt-count{font-size:13px;font-weight:600;color:var(--fmt-ink);align-self:center;background:var(--fmt-hover);padding:7px 14px;border-radius:7px;border:1px solid var(--fmt-line)}
+.fmt-breakdown-row{display:flex;align-items:center;gap:16px;flex-wrap:wrap;padding:14px 20px;background:var(--fmt-surface);border:1px solid var(--fmt-line);border-radius:10px}
+.fmt-breakdown-row .fmt-control-label{font-size:13.5px;font-weight:700;color:var(--fmt-ink)}
+.fmt-segment-tabs{display:inline-flex;gap:8px;background:var(--fmt-hover);padding:6px;border-radius:10px;border:1px solid var(--fmt-line)}
+.fmt-segment-tabs button{display:inline-flex;align-items:center;justify-content:center;gap:8px;min-height:42px;padding:10px 24px!important;border:1px solid transparent;border-radius:7px;background:transparent;font-size:14px;font-weight:600;color:var(--fmt-muted);cursor:pointer;transition:all .15s ease;white-space:nowrap;line-height:1.4}
+.fmt-segment-tabs button:hover{background:var(--fmt-surface);color:var(--fmt-ink)}
+.fmt-segment-tabs button[aria-pressed=true]{background:var(--fmt-blue);color:#ffffff!important;border-color:var(--fmt-blue);font-weight:700;box-shadow:0 1px 4px rgba(49,101,140,0.35)}
+.design-dark .fmt-segment-tabs button[aria-pressed=true]{background:var(--fmt-blue);color:#1e293b!important}
+.fmt-tabs{display:flex;gap:20px;border-bottom:1px solid var(--fmt-line);overflow:auto}
+.fmt-tabs button{flex:none;padding:10px 0;border:0;border-bottom:2px solid transparent;background:none;font-size:13px;color:var(--fmt-muted)}
+.fmt-tabs button:hover{color:var(--fmt-ink)}
+.fmt-tabs button[aria-pressed=true]{color:var(--fmt-blue);border-bottom-color:var(--fmt-blue);font-weight:650}
+/* Keep view and measure controls mounted while only the report changes. */
+.fmt-controls{padding:14px 16px;border:1px solid var(--fmt-line);border-radius:8px;background:var(--fmt-surface);display:grid;gap:12px}
+.fmt-control-row{display:grid;grid-template-columns:76px minmax(0,1fr);gap:12px;align-items:center}
+.fmt-control-label{font-size:12px;font-weight:650;color:var(--fmt-muted)}
+.fmt-controls .fmt-tabs{border:0;gap:6px;overflow:visible;flex-wrap:wrap}
+.fmt-controls .fmt-tabs button{display:inline-flex;align-items:center;justify-content:center;gap:8px;min-height:44px;border:1px solid transparent;border-radius:6px;padding:9px 14px;font-size:13px;line-height:1.4;white-space:normal}
+.fmt-controls .fmt-tabs button:hover{background:var(--fmt-hover);color:var(--fmt-ink)}
+.fmt-controls .fmt-scope-tabs button[aria-pressed=true]{background:var(--fmt-blue);color:var(--fmt-surface);border-color:var(--fmt-blue);font-weight:650}
+.fmt-controls .fmt-measure-tabs{padding-top:12px;border-top:1px solid var(--fmt-line)}
+.fmt-controls .fmt-measure-tabs button{background:var(--fmt-hover)}
+.fmt-controls .fmt-measure-tabs button[aria-pressed=true]{background:var(--fmt-surface);color:var(--fmt-blue);border-color:var(--fmt-blue);font-weight:650}
+.fmt-tab-count{font-size:12px;font-weight:650;line-height:1.3;min-width:24px;padding:2px 6px;border:1px solid currentColor;border-radius:4px}
+.fmt-page-actions{flex-wrap:wrap}
+.fmt-page-actions .fmt-field{flex-direction:row;align-items:center}
+.fmt-page-actions .fmt-field select{min-width:68px;width:auto}
+.fmt-page-actions .fmt-btn{min-width:44px;padding:8px}
+.fmt-range{font-weight:600;color:var(--fmt-ink)}
+@media(max-width:650px){.fmt-controls{padding:12px}.fmt-control-row{grid-template-columns:minmax(0,1fr);gap:6px}.fmt-controls .fmt-tabs{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:5px}.fmt-controls .fmt-tabs button{padding:8px 5px;font-size:12px;gap:4px;flex-wrap:wrap}.fmt-tab-count{font-size:11px;min-width:20px}.fmt-controls .fmt-measure-tabs{padding-top:0;border-top:0}.fmt-footer .fmt-page-actions{width:100%;gap:8px}.fmt-footer .fmt-page-actions .fmt-field:first-child{margin-right:auto}}
+@media(max-width:650px){.fmt-controls .fmt-scope-tabs button{flex-direction:column}.fmt-controls .fmt-measure-tabs button{min-height:52px}}
+.fmt-panel{min-width:0;background:var(--fmt-surface);border:1px solid var(--fmt-line);border-radius:8px;overflow:hidden}
+.fmt-panel-head{display:flex;align-items:flex-start;justify-content:space-between;gap:12px;flex-wrap:wrap;padding:16px 20px}
+.fmt-panel-head h3{font-size:16px;font-weight:650;margin:0 0 3px;color:var(--fmt-ink)}
+.fmt-switch{display:inline-flex;gap:2px;flex-wrap:wrap;padding:3px;border:1px solid var(--fmt-line);border-radius:6px}
+.fmt-switch button{border:0;border-radius:3px;background:transparent;padding:5px 10px;min-height:30px;font-size:12px;color:var(--fmt-muted)}
+.fmt-switch button:hover{color:var(--fmt-ink)}
+.fmt-switch button[aria-pressed=true]{color:var(--fmt-blue);background:var(--fmt-hover);font-weight:650}
+.fmt-table-scroll{overflow:auto;max-height:480px;isolation:isolate;scrollbar-gutter:stable;scrollbar-width:thin;scrollbar-color:var(--fmt-muted) var(--fmt-hover)}
+#fmBacklogSubPage .fmt-table{table-layout:fixed;border-collapse:separate;border-spacing:0;width:100%;min-width:700px;background:var(--fmt-surface);font-size:13px;line-height:1.35;color:var(--fmt-ink);font-variant-numeric:tabular-nums}
+#fmBacklogSubPage .fmt-table :is(th,td){padding:6px 14px;text-align:center;vertical-align:middle;border:0;border-bottom:1px solid var(--fmt-rule);background:var(--fmt-surface);white-space:nowrap;position:static;transform:none;box-shadow:none}
+#fmBacklogSubPage .fmt-table thead th{position:sticky;top:0;z-index:3;color:var(--fmt-muted);font-size:12px;font-weight:650;text-transform:none;letter-spacing:0;white-space:normal;line-height:1.3;padding:8px 14px;border-bottom:1px solid var(--fmt-line)}
+#fmBacklogSubPage .fmt-table tbody td{font-size:13.5px;font-weight:600;letter-spacing:-0.01em}
+#fmBacklogSubPage .fmt-table .fmt-identity{width:260px;max-width:none;min-width:0;position:sticky;left:0;z-index:2;text-align:left;white-space:normal;border-right:1px solid var(--fmt-line);background:var(--fmt-surface)}
+#fmBacklogSubPage .fmt-table thead .fmt-identity{z-index:4}
+#fmBacklogSubPage .fmt-table tbody tr:hover>:is(td,th),#fmBacklogSubPage .fmt-table tbody tr:focus-within>:is(td,th){background:var(--fmt-hover)}
+#fmBacklogSubPage .fmt-table tbody .fmt-total>:is(td,th){border-top:2px solid var(--fmt-line);border-bottom:2px solid var(--fmt-line);font-size:14px;font-weight:700;background:var(--fmt-hover)}
+#fmBacklogSubPage .fmt-table thead th.fmt-col-2d{color:var(--fmt-muted)}
+#fmBacklogSubPage .fmt-table thead th.fmt-col-3d{color:var(--fmt-amber)}
+#fmBacklogSubPage .fmt-table thead th.fmt-col-4d{color:var(--fmt-orange)}
+#fmBacklogSubPage .fmt-table thead th.fmt-col-dgt4{color:var(--fmt-red);font-weight:700}
+#fmBacklogSubPage .fmt-table thead th.fmt-col-total{color:var(--fmt-ink);font-weight:700;background:var(--fmt-hover)}
+#fmBacklogSubPage .fmt-table td.fmt-col-2d{color:var(--fmt-ink);font-weight:600}
+#fmBacklogSubPage .fmt-table td.fmt-col-3d{color:var(--fmt-amber);font-weight:600}
+#fmBacklogSubPage .fmt-table td.fmt-col-4d{color:var(--fmt-orange);font-weight:600}
+#fmBacklogSubPage .fmt-table td.fmt-col-dgt4,#fmBacklogSubPage .fmt-table td.fmt-risk{color:var(--fmt-red);font-weight:700;font-size:13.5px}
+#fmBacklogSubPage .fmt-table td.fmt-col-total{color:var(--fmt-ink);font-weight:700;font-size:13.5px;background:var(--fmt-hover)}
+#fmBacklogSubPage .fmt-table tbody tr:hover>td.fmt-col-total{background:var(--fmt-line)}
+.fmt-identity-name{display:block;overflow-wrap:break-word;font-size:12.5px;font-weight:650;line-height:1.35;color:var(--fmt-ink)}
+.fmt-identity-meta{display:block;color:var(--fmt-muted);font-size:11px;margin-top:1px;font-weight:400}
+.fmt-rank{display:inline-block;min-width:22px;margin-right:4px;color:var(--fmt-muted);font-weight:500}
+.fmt-key-number{font-weight:700;color:var(--fmt-ink)}
+#fmBacklogSubPage .fmt-table .fmt-zero{color:var(--fmt-muted)!important;font-weight:400!important;opacity:.45;font-size:12.5px}
+#fmBacklogSubPage .fmt-table .fmt-missing{color:var(--fmt-muted)!important;font-weight:400!important;opacity:.4}
+#fmBacklogSubPage .fmt-table .fmt-risk .fmt-key-number{color:inherit}
+.fmt-delta{display:inline-flex;align-items:center;gap:4px;padding:3px 9px;border-radius:6px;font-size:13px;font-weight:650;line-height:1.5;white-space:nowrap}
+.fmt-delta.is-up{color:var(--fmt-red);background:var(--fmt-red-soft)}
+.fmt-delta.is-down{color:var(--fmt-green);background:var(--fmt-green-soft)}
+.fmt-delta.is-flat{color:var(--fmt-muted);background:var(--fmt-hover)}
+.fmt-metric strong.is-up{color:var(--fmt-red)}
+.fmt-metric strong.is-down{color:var(--fmt-green)}
+.fmt-metric strong.is-flat{color:var(--fmt-muted)}
+.fmt-legend{display:flex;align-items:center;gap:8px 16px;flex-wrap:wrap}
+.fmt-legend>span{display:inline-flex;align-items:center;gap:6px}
+.fmt-legend i{font-style:normal;font-weight:650}
+.fmt-legend .is-up{color:var(--fmt-red)}
+.fmt-legend .is-down{color:var(--fmt-green)}
+.fmt-share{display:block;width:100%;max-width:80px;margin:6px auto 0 auto;height:3px;background:var(--fmt-rule);border-radius:2px}
+.fmt-share i{display:block;height:100%;background:var(--fmt-blue)}
+.fmt-caption{padding:10px 20px;color:var(--fmt-muted);font-size:12px;border-top:1px solid var(--fmt-line)}
+.fmt-footer{display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:12px;padding:12px 20px;background:var(--fmt-surface);border-top:1px solid var(--fmt-line)}
+.fmt-range{font-size:13.5px;font-weight:650;color:var(--fmt-ink)}
+.fmt-more-actions{display:inline-flex;align-items:center;gap:10px;flex-wrap:wrap}
+.fmt-btn-more{min-height:38px;padding:8px 20px;background:var(--fmt-blue)!important;color:#ffffff!important;border:1px solid var(--fmt-blue)!important;border-radius:7px;font-size:13.5px!important;font-weight:650;display:inline-flex;align-items:center;gap:6px;box-shadow:0 1px 3px rgba(49,101,140,0.25);cursor:pointer;transition:all .15s ease}
+.fmt-btn-more:hover:not(:disabled),.fmt-btn-more:focus-visible{background:#234e6e!important;border-color:#1c3e58!important;color:#ffffff!important;box-shadow:0 3px 8px rgba(49,101,140,0.35);transform:translateY(-1px)}
+.fmt-btn-more:active:not(:disabled){background:#1c3e58!important;transform:translateY(0);box-shadow:0 1px 2px rgba(49,101,140,0.2)}
+.design-dark .fmt-btn-more{background:var(--fmt-blue)!important;color:#ffffff!important;border-color:var(--fmt-blue)!important}
+.design-dark .fmt-btn-more:hover:not(:disabled){background:#3c78a4!important;border-color:#488ebf!important;color:#ffffff!important}
+.fmt-btn-less,.fmt-btn-all{min-height:38px;padding:8px 16px;background:var(--fmt-surface)!important;color:var(--fmt-ink)!important;border:1px solid var(--fmt-line)!important;border-radius:7px;font-size:13px!important;font-weight:600;display:inline-flex;align-items:center;gap:6px;cursor:pointer;transition:all .15s ease}
+.fmt-btn-less:hover:not(:disabled),.fmt-btn-all:hover:not(:disabled){background:var(--fmt-hover)!important;border-color:var(--fmt-blue)!important;color:var(--fmt-blue)!important}
+.fmt-btn-less:active:not(:disabled),.fmt-btn-all:active:not(:disabled){background:var(--fmt-line)!important}
+.fmt-page-actions{display:flex;align-items:center;gap:12px}
+.fmt-empty{padding:32px 20px!important;text-align:center!important;white-space:normal!important;color:var(--fmt-muted)}
+.fmt-note{font-size:12px;color:var(--fmt-muted);margin:0;line-height:1.6}
+.fmt-wrap [hidden]{display:none!important}
+@media(max-width:900px){#fmBacklogSubPage .fmt-table .fmt-identity{width:230px}.fmt-metric{padding:14px}.fmt-metrics{grid-template-columns:repeat(2,minmax(0,1fr))}.fmt-metric:nth-child(3){border-left:0}.fmt-metric:nth-child(n+3){border-top:1px solid var(--fmt-line)}}
+@media(max-width:550px){.fmt-heading{flex-direction:column}.fmt-heading .fmt-btn{width:100%}.fmt-heading h2{font-size:22px}.fmt-toolbar>.fmt-field{flex:1;min-width:0;margin:0}.fmt-field input,.fmt-field select{width:100%;min-width:0}.fmt-toolbar>.fmt-field:first-child{flex-basis:100%}.fmt-metric strong{font-size:22px}.fmt-metric:first-child strong{font-size:28px}.fmt-panel-head{padding:14px}.fmt-snapshot{flex-direction:column;gap:5px}.fmt-subnav{gap:20px}.fmt-subnav-btn{font-size:13px!important}#fmBacklogSubPage .fmt-table{min-width:660px}#fmBacklogSubPage .fmt-table .fmt-identity{width:170px}#fmBacklogSubPage .fmt-table :is(th,td){padding:10px 12px}.fmt-footer{padding:12px 14px}.fmt-switch{max-width:100%}.fmt-tabs{gap:18px}.fmt-tabs button{font-size:12px}}
+</style>
+<script>
+(function(){
+  'use strict';
+  var tracker={scope:'allhubs',metric:'focus',channel:'mp',compare:'morning',zone:'ALL',search:'',limit:15,page:1,pageSize:15};
+  var detail={mode:'channels',channel:'mp',zone:'ALL',search:'',limit:15,page:1,pageSize:15};
+  var channels={mp:'MP · Marketplace',rv:'RV · Reverse',nss:'NSS · Social'};
+  function esc(v){return String(v==null?'':v).replace(/[&<>"']/g,function(c){return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]})}
+  function number(v){if(v==null||String(v).trim()===''||v==='—'||v==='-')return null;var n=Number(String(v).replace(/,/g,''));return isFinite(n)?n:null}
+  function display(v){var n=number(v);return n==null?'<span class="fmt-missing">—</span>':'<span'+(n===0?' class="fmt-zero"':'')+'>'+n.toLocaleString('en-US')+'</span>'}
+  function normalized(v){return String(v||'').normalize('NFD').replace(/[\u0300-\u036f]/g,'').replace(/đ/g,'d').replace(/Đ/g,'D').toLowerCase().trim()}
+  function sum(rows,fn){return rows.reduce(function(total,row){var v=number(fn(row));return total==null&&v==null?null:(total||0)+(v||0)},null)}
+  function getData(){return window.FM_BACKLOG_DATA||{}}
+  function zoneRows(){return (getData().zoneRows||[]).filter(function(r){return r.zone!=='FLM HCM'})}
+  function match(row,s){var q=normalized(s.search);return (s.zone==='ALL'||row.zone===s.zone)&&(!q||normalized((row.hubName||'')+' '+row.zone).includes(q))}
+  function delta(current,before){var c=number(current),b=number(before);if(c==null||b==null)return '<span class="fmt-missing">—</span>';if(b===0)return c===0?'<span class="fmt-delta is-flat">0%</span>':'<span class="fmt-delta is-flat" title="No percentage baseline: previous value is 0">From 0</span>';var pct=Math.round((c-b)/b*100);return '<span class="fmt-delta '+(pct>0?'is-up':pct<0?'is-down':'is-flat')+'">'+(pct>0?'+':'')+pct+'%'+(pct>0?' ↑':pct<0?' ↓':'')+'</span>'}
+  function changeState(value){var n=number(value);return n==null?'':n>0?'is-up':n<0?'is-down':'is-flat'}
+  function signedCount(value){var n=number(value);return (n>0?'+':'')+display(value)}
+  function changeCount(current,before){var c=number(current),b=number(before);if(c==null||b==null)return display(null);var diff=c-b;return '<span class="fmt-delta '+changeState(diff)+'" title="'+(diff>0?'Backlog increased':diff<0?'Backlog decreased':'No change')+'">'+signedCount(diff)+'</span>'}
+  function legend(){return '<div class="fmt-legend fmt-note" aria-label="Backlog change colours"><span><i class="is-up" aria-hidden="true">↑</i> Backlog increased</span><span><i class="is-down" aria-hidden="true">↓</i> Backlog decreased</span><span>0 · No change</span></div>'}
+  function pct(v){var n=parseFloat(v);return isFinite(n)?n:null}
+  function options(rows,selected){return '<option value="ALL">All zones</option>'+Array.from(new Set(rows.map(function(r){return r.zone}))).sort().map(function(z){return '<option value="'+esc(z)+'"'+(z===selected?' selected':'')+'>'+esc(z)+'</option>'}).join('')}
+  function button(label,attr,value,active){return '<button type="button" '+attr+'="'+esc(value)+'" aria-pressed="'+String(active===value)+'">'+esc(label)+'</button>'}
+  function switches(items,attr,active,label){return '<div class="fmt-switch" role="group" aria-label="'+esc(label)+'">'+items.map(function(item){return button(item[1],attr,item[0],active)}).join('')+'</div>'}
+  function identity(row){return '<th scope="row" class="fmt-identity"><span class="fmt-identity-name">'+(row.rank?'<span class="fmt-rank">'+esc(row.rank)+'.</span>':'')+esc(row.hubName||row.zone)+'</span>'+(row.hubName?'<span class="fmt-identity-meta">'+esc(row.zone)+'</span>':'')+'</th>'}
+  function table(rows,columns,caption){var html='<div class="fmt-table-scroll" tabindex="0" role="region" aria-label="'+esc(caption)+'"><table class="fmt-table"><thead><tr><th scope="col" class="fmt-identity">'+(tracker.scope==='zone'&&!rows.some(function(r){return r.hubName})?'Zone':'HUB / Zone')+'</th>'+columns.map(function(c){return '<th scope="col"'+(c.cls?' class="'+c.cls+'"':'')+'>'+esc(c.label)+'</th>'}).join('')+'</tr></thead><tbody>';html+=rows.length?rows.map(function(row){return '<tr'+(row.zone==='Filtered total'?' class="fmt-total"':'')+'>'+identity(row)+columns.map(function(c){var classes=[c.cls,c.risk?'fmt-risk':''].filter(Boolean).join(' ');return '<td'+(classes?' class="'+classes+'"':'')+'>'+c.cell(row)+'</td>'}).join('')+'</tr>'}).join(''):'<tr><td colspan="'+(columns.length+1)+'" class="fmt-empty">No HUBs or zones match your filters. Try another name or clear the filters.</td></tr>';return html+'</tbody></table></div>'}
+  function panel(title,note,tools,content,foot){return '<section class="fmt-panel"><header class="fmt-panel-head"><div><h3>'+esc(title)+'</h3><p>'+esc(note)+'</p></div>'+(tools||'')+'</header>'+content+(foot?'<div class="fmt-caption">'+esc(foot)+'</div>':'')+'</section>'}
+  function metric(label,value,note,isChange){return '<div class="fmt-metric"><span>'+esc(label)+'</span><strong'+(isChange?' class="'+changeState(value)+'"':'')+'>'+(isChange?signedCount(value):display(value))+'</strong><small>'+esc(note)+'</small></div>'}
+  function snapshots(){var t=(getData().trackerMeta||{}).timestamps||{};return '<div class="fmt-snapshot"><span><b>Snapshot supplied</b> · '+esc(t.now||'Time unavailable')+'</span><span>Morning '+esc(t.morning||'—')+'</span><span>D−1 '+esc(t.dMinus1||'—')+'</span><span>W−1 '+esc(t.wMinus1||'—')+'</span></div>'}
+  function timeLabel(key,fallback){var t=(getData().trackerMeta||{}).timestamps||{},s=t[key];return s?String(s).split(/\s+/).pop():fallback}
+  function toolbar(s,rows,prefix){return '<div class="fmt-toolbar"><label class="fmt-field">Search HUB / zone<input id="'+prefix+'Search" type="search" autocomplete="off" placeholder="Name or zone…" value="'+esc(s.search)+'"></label><button type="button" class="fmt-btn" id="'+prefix+'Clear">Clear filters</button><span class="fmt-count" id="'+prefix+'Count" role="status" aria-live="polite"></span></div>'}
+  function bindFilters(container,s,prefix,update){var input=container.querySelector('#'+prefix+'Search'),zone=container.querySelector('#'+prefix+'Zone');input.oninput=function(){s.search=input.value;s.limit=15;s.page=1;update()};if(zone)zone.onchange=function(){s.zone=zone.value;s.limit=15;s.page=1;update()};container.querySelector('#'+prefix+'Clear').onclick=function(){s.search='';s.zone='ALL';s.limit=15;s.page=1;input.value='';if(zone)zone.value='ALL';update();input.focus()}}
+  function aggregate(rows){var out={zone:'Filtered total'};['mp','rv','nss'].forEach(function(ch){out[ch]={};['d2','d3','d4','dgt4','total'].forEach(function(k){out[ch][k]=sum(rows,function(r){return (r[ch]||{})[k]})})});out.totalCombine=sum(rows,function(r){return r.totalCombine});['d0MorningNow','d0VsDMinus1','w0VsWMinus1'].forEach(function(k){var fields={d0MorningNow:['morning','now'],d0VsDMinus1:['d0','dMinus1'],w0VsWMinus1:['w0','wMinus1']}[k];out[k]={};fields.forEach(function(f){out[k][f]=sum(rows,function(r){return (r[k]||{})[f]})})});return out}
+  function focusColumns(){return [{label:'Pending ≥2d',cls:'fmt-col-total',cell:function(r){return display(r.totalCombine)}},{label:'Backlog ≥4d',cls:'fmt-col-dgt4',cell:function(r){return '<span class="fmt-key-number">'+display(r.backlogGte4!=null?r.backlogGte4:(r.d0MorningNow||{}).now)+'</span>'},risk:true},{label:'vs morning',cell:function(r){var c=r.d0MorningNow||{};return delta(c.now,c.morning)}},{label:'Scope share ≥4d',cell:function(r){var p=pct(r.sharePct);return p==null?'—':esc(p.toFixed(1))+'%<span class="fmt-share" aria-hidden="true"><i style="width:'+Math.max(0,Math.min(100,p))+'%"></i></span>'}},{label:'Cumulative share',cell:function(r){return r.cumulativePct==null?'—':esc(r.cumulativePct)}}]}
+  function agingColumns(ch){return [{label:'2d',key:'d2',cls:'fmt-col-2d'},{label:'3d',key:'d3',cls:'fmt-col-3d'},{label:'4d',key:'d4',cls:'fmt-col-4d'},{label:'>4d',key:'dgt4',risk:true,cls:'fmt-col-dgt4'},{label:'Total ≥2d',key:'total',cls:'fmt-col-total'}].map(function(c){return {label:c.label,risk:c.risk,cls:c.cls,cell:function(r){return display((r[ch]||{})[c.key])}}})}
+  function comparisonColumns(){var specs={morning:{key:'d0MorningNow',a:'morning',b:'now',left:'Morning '+timeLabel('morning',''),right:'Current '+timeLabel('now','')},daily:{key:'d0VsDMinus1',a:'dMinus1',b:'d0',left:'D−1',right:'D0'},weekly:{key:'w0VsWMinus1',a:'wMinus1',b:'w0',left:'W−1',right:'W0'}},c=specs[tracker.compare];return [{label:c.left,cls:'fmt-col-2d',cell:function(r){return display((r[c.key]||{})[c.a])}},{label:c.right,cls:'fmt-col-total',cell:function(r){return display((r[c.key]||{})[c.b])}},{label:'Change · orders',cell:function(r){return changeCount((r[c.key]||{})[c.b],(r[c.key]||{})[c.a])}},{label:'Change · %',cell:function(r){return delta((r[c.key]||{})[c.b],(r[c.key]||{})[c.a])}}]}
+  function trackerIndex(){
+    var data=getData(),byHub=new Map(),tops=data.topHubRows||[];
+    function key(row){return normalized(row.zone)+'|'+normalized(row.hubName)}
+    function prepare(row){var copy=Object.assign({},row);copy.searchKey=normalized((row.hubName||'')+' '+row.zone);return copy}
+    (data.hubDetails||[]).forEach(function(row){
+      var copy=prepare(row),ages=[];
+      Object.keys(channels).forEach(function(ch){ages.push(number((row[ch]||{}).d4),number((row[ch]||{}).dgt4))});
+      copy.backlogGte4=ages.some(function(v){return v==null})?null:ages.reduce(function(a,b){return a+b},0);
+      copy.d0MorningNow={now:copy.backlogGte4};copy.d0VsDMinus1={d0:copy.backlogGte4};
+      byHub.set(key(row),copy);
+    });
+    tops.forEach(function(row){var copy=Object.assign({},byHub.get(key(row))||{},prepare(row));copy.priorityRank=number(row.rank);copy.isPriority=true;byHub.set(key(row),copy)});
+    var all=Array.from(byHub.values()).sort(function(a,b){var av=number(a.backlogGte4),bv=number(b.backlogGte4);return (bv==null?-1:bv)-(av==null?-1:av)||(a.priorityRank||Infinity)-(b.priorityRank||Infinity)||a.hubName.localeCompare(b.hubName)});
+    var baseline=sum(all,function(r){return r.backlogGte4}),cumulative=0;
+    all.forEach(function(row,i){row.rank=i+1;var value=number(row.backlogGte4);if(value!=null)cumulative+=value;row.sharePct=baseline>0&&value!=null?(value/baseline*100).toFixed(1)+'%':null;row.cumulativePct=baseline>0&&value!=null?(cumulative/baseline*100).toFixed(1)+'%':null});
+    return {all:all,priority:all.filter(function(row){return row.isPriority}).sort(function(a,b){return a.priorityRank-b.priorityRank}),zones:zoneRows().map(prepare)};
+  }
+  function trackerControls(index){
+    function scope(label,value,count){return '<button type="button" data-fmt-scope="'+value+'" aria-controls="fmtReport" aria-pressed="'+String(tracker.scope===value)+'"><span>'+label+'</span><span class="fmt-tab-count" data-fmt-count="'+value+'">'+count+'</span></button>'}
+    return '<section class="fmt-controls" aria-label="Master Tracker views and measures"><div class="fmt-control-row"><span class="fmt-control-label">View</span><div class="fmt-tabs fmt-scope-tabs" role="group" aria-label="Report scope">'+scope('All HUBs','allhubs',index.all.length)+scope('Priority HUBs','tophubs',index.priority.length)+scope('Zone summary','zone',index.zones.length)+'</div></div><div class="fmt-control-row"><span class="fmt-control-label">Measures</span><div class="fmt-tabs fmt-measure-tabs" role="group" aria-label="Measures">'+button('Priority & impact','data-fmt-metric','focus',tracker.metric)+button('Aging by channel','data-fmt-metric','aging',tracker.metric)+button('Time comparison','data-fmt-metric','compare',tracker.metric)+'</div></div></section>';
+  }
+  function trackerNote(index){return 'Earlier snapshots are supplied for '+index.priority.length+' priority HUBs only; unavailable comparisons appear as —. Share = HUB backlog ≥4d / reported backlog ≥4d in the selected authorized scope. Cumulative shares follow the scope ranking before search, zone filters and paging. CSV includes every filtered HUB across all pages.'}
+  function trackerPager(total,shownCount){
+    var hasMore=shownCount<total;
+    var hasLess=shownCount>15;
+    var range=total?(shownCount>=total?'Showing all '+total+' HUBs':'Showing '+shownCount+' of '+total+' HUBs'):'0 HUBs';
+    var actions='';
+    if(hasMore){
+      actions+='<button type="button" class="fmt-btn fmt-btn-more" data-fmt-action="more" data-fmt-page="next">Show more (+'+Math.min(15,total-shownCount)+' HUBs) ↓</button>';
+      actions+='<button type="button" class="fmt-btn fmt-btn-all" data-fmt-action="all" data-fmt-page="last">Show all ('+total+')</button>';
+    }
+    if(hasLess){
+      actions+='<button type="button" class="fmt-btn fmt-btn-less" data-fmt-action="less" data-fmt-page="first">Show less ↑</button>';
+    }
+    return '<div class="fmt-footer"><span class="fmt-range" role="status" aria-live="polite">'+esc(range)+'</span><div class="fmt-more-actions">'+actions+'</div></div>';
+  }
+  window.renderFmPendingTrackerView_=function(container){
+    if(!container)return;
+    if(container._fmtDispose)container._fmtDispose();
+    var index=trackerIndex(),selection,selectionKey='',metricsMarkup='',timer,composing=false;
+    container.innerHTML='<div class="fmt-wrap"><header class="fmt-heading"><div><span class="fmt-eyebrow">First mile / Pending pickup</span><h2>Pending PU Master Tracker</h2><p>All supplied HUBs, ranked by backlog ≥4 days. Filter by zone or switch to priority HUBs.</p></div><button type="button" id="fmtExport" class="fmt-btn fmt-btn-primary">Export filtered CSV</button></header>'+snapshots()+'<div class="fmt-metrics" id="fmtMetrics"></div>'+toolbar(tracker,index.zones,'fmt')+trackerControls(index)+'<div id="fmtReport" role="region" aria-label="Master Tracker report" tabindex="-1"></div><p class="fmt-note">'+esc(trackerNote(index))+'</p></div>';
+    var report=container.querySelector('#fmtReport'),metrics=container.querySelector('#fmtMetrics'),count=container.querySelector('#fmtCount'),input=container.querySelector('#fmtSearch');
+    function filtered(){
+      var q=normalized(tracker.search),key=JSON.stringify([tracker.scope,tracker.zone,q]);
+      if(key!==selectionKey){
+        function matches(row){return (tracker.zone==='ALL'||row.zone===tracker.zone)&&(!q||row.searchKey.includes(q))}
+        var all=index.all.filter(matches),priority=index.priority.filter(matches),zones=index.zones.filter(matches),rows=tracker.scope==='zone'?zones:tracker.scope==='tophubs'?priority:all;
+        var comparable=rows.filter(function(r){var c=r.d0MorningNow||{};return number(c.now)!=null&&number(c.morning)!=null});
+        selection={rows:rows,counts:{allhubs:all.length,tophubs:priority.length,zone:zones.length},backlog:sum(rows,function(r){return r.backlogGte4!=null?r.backlogGte4:(r.d0MorningNow||{}).now}),pending:sum(rows,function(r){return r.totalCombine}),change:sum(comparable,function(r){return number(r.d0MorningNow.now)-number(r.d0MorningNow.morning)}),comparable:comparable.length};
+        selectionKey=key;
+      }
+      return selection;
+    }
+    function flush(){clearTimeout(timer);timer=null}
+    function focus(selector){var el=container.querySelector(selector);if(!el||el.disabled)el=container.querySelector('#fmtTrackerPage')||report;el.focus({preventScroll:true})}
+    function update(){
+      flush();var selected=filtered(),rows=selected.rows,isZone=tracker.scope==='zone',noun=isZone?'zones':'HUBs';
+      var markup=metric('Backlog ≥4d',selected.backlog,'Filtered '+noun+' · orders')+metric('Pending ≥2d',selected.pending,'MP + RV + NSS · orders')+metric(isZone?'Zones in view':'HUBs in view',rows.length,'All filtered results · before paging')+metric('Change since morning',selected.change,selected.comparable+' / '+rows.length+' '+noun+' with comparison',true);
+      if(markup!==metricsMarkup){metrics.innerHTML=markup;metricsMarkup=markup}
+      count.textContent=rows.length+' matching '+noun;
+      container.querySelectorAll('[data-fmt-scope]').forEach(function(b){b.setAttribute('aria-pressed',String(b.dataset.fmtScope===tracker.scope))});
+      container.querySelectorAll('[data-fmt-metric]').forEach(function(b){b.setAttribute('aria-pressed',String(b.dataset.fmtMetric===tracker.metric))});
+      container.querySelectorAll('[data-fmt-count]').forEach(function(b){b.textContent=selected.counts[b.dataset.fmtCount]});
+      var limit=tracker.limit||15,shown=isZone?rows:rows.slice(0,limit),pager=isZone?'':trackerPager(rows.length,shown.length),withTotal=isZone&&shown.length?shown.concat([aggregate(rows)]):shown;
+      var content='',caption=isZone?'Zone backlog':tracker.scope==='tophubs'?'Priority HUB backlog':'All HUB backlog';
+      if(tracker.metric==='focus'){
+        var cols=focusColumns();if(isZone)cols=cols.slice(0,3).concat([{label:'vs D−1',cell:function(r){var c=r.d0VsDMinus1||{};return delta(c.d0,c.dMinus1)}}]);
+        content=panel(caption,isZone?'Selected zones · ages ≥2d and ≥4d':'Ranked by backlog ≥4d · shares use reported backlog in the selected scope',legend(),table(withTotal,cols,caption)+pager,'Unit: orders. A decrease in backlog is shown in green; an increase in red.');
+      }else if(tracker.metric==='aging'){
+        content=panel('Aging · '+channels[tracker.channel],'One channel at a time · unit: orders',switches(Object.keys(channels).map(function(k){return [k,k.toUpperCase()]}),'data-fmt-channel',tracker.channel,'Backlog channel'),table(withTotal,agingColumns(tracker.channel),'Aging by channel')+pager,'4d and >4d are separate age buckets. The ≥4d priority measure includes both.');
+      }else{
+        content=panel('Backlog ≥4d · time comparison','Missing earlier snapshots appear as —; percentages use the two displayed values.',switches([['morning','Morning / current'],['daily','D0 / D−1'],['weekly','W0 / W−1']],'data-fmt-compare',tracker.compare,'Comparison period'),table(withTotal,comparisonColumns(),'Backlog time comparison')+pager,'From 0 means the earlier snapshot is zero, so a percentage change cannot be calculated.');
+      }
+      report.innerHTML=content;
+    }
+    container.onclick=function(event){
+      var b=event.target.closest('button');if(!b||!container.contains(b)||b.disabled)return;
+      if(b.id==='fmtExport'){if(timer)update();var selected=filtered();exportTracker(tracker.scope==='zone'?[]:selected.rows,tracker.scope==='zone'?selected.rows:[]);return}
+      if(b.id==='fmtClear'){tracker.search='';tracker.zone='ALL';tracker.limit=15;tracker.page=1;input.value='';var z=container.querySelector('#fmtZone');if(z)z.value='ALL';update();input.focus();return}
+      var keys=['scope','metric','channel','compare'];
+      for(var i=0;i<keys.length;i++){var attr='data-fmt-'+keys[i],value=b.getAttribute(attr);if(value!=null){tracker[keys[i]]=value;if(keys[i]==='scope')tracker.limit=15;update();focus('['+attr+'="'+value+'"]');return}}
+      var action=b.dataset.fmtAction||b.dataset.fmtPage;if(action){var total=filtered().rows.length;if(action==='more'||action==='next'){tracker.limit=Math.min(total,(tracker.limit||15)+15)}else if(action==='all'||action==='last'){tracker.limit=total}else if(action==='less'||action==='first'){tracker.limit=15;var scroll=report.querySelector('.fmt-table-scroll');if(scroll)scroll.scrollTop=0}update();focus('[data-fmt-action="'+action+'"]')}
+    };
+    container.onchange=function(event){var el=event.target;if(el.id==='fmtZone'){tracker.zone=el.value;tracker.limit=15;tracker.page=1;update()}else if(el.id==='fmtTrackerPageSize'){tracker.pageSize=Number(el.value);tracker.limit=Number(el.value);update();focus('#fmtTrackerPageSize')}else if(el.id==='fmtTrackerPage'){tracker.page=Number(el.value);update();focus('#fmtTrackerPage')}};
+    function schedule(){tracker.search=input.value;tracker.limit=15;tracker.page=1;flush();if(!composing)timer=setTimeout(function(){if(container.isConnected)update()},120)}
+    input.oninput=schedule;input.oncompositionstart=function(){composing=true;flush()};input.oncompositionend=function(){composing=false;schedule()};
+    container._fmtRefresh=function(){
+      var previousZones=JSON.stringify(index.zones.map(function(r){return r.zone})),scroll=report.querySelector('.fmt-table-scroll'),top=scroll?scroll.scrollTop:0,left=scroll?scroll.scrollLeft:0,activeElement=document.activeElement;
+      var focusedId=activeElement&&activeElement.id,focusedPage=activeElement&&activeElement.getAttribute('data-fmt-page');
+      index=trackerIndex();selectionKey='';
+      if(JSON.stringify(index.zones.map(function(r){return r.zone}))!==previousZones){if(!index.zones.some(function(r){return r.zone===tracker.zone}))tracker.zone='ALL';var z=container.querySelector('#fmtZone');if(z)z.innerHTML=options(index.zones,tracker.zone)}
+      var snapshot=container.querySelector('.fmt-snapshot');if(snapshot)snapshot.outerHTML=snapshots();update();
+      container.querySelector('.fmt-wrap>.fmt-note').textContent=trackerNote(index);
+      scroll=report.querySelector('.fmt-table-scroll');if(scroll){scroll.scrollTop=top;scroll.scrollLeft=left}
+      if(activeElement&&!activeElement.isConnected){if(focusedId)focus('#'+focusedId);else if(focusedPage)focus('[data-fmt-page="'+focusedPage+'"]')}
+    };
+    container._fmtDispose=function(){flush();container.onclick=null;container.onchange=null;container._fmtRefresh=null;container._fmtDispose=null};
+    container.querySelector('.fmt-wrap>.fmt-note').textContent=trackerNote(index);
+    update();
+  };
+  window.renderFmValidationDetailView_=function(container){
+    if(!container)return;
+    if(container._fmtDispose)container._fmtDispose();
+    var all=getData().hubDetails||[],meta=getData().validationMeta||{};
+    container.innerHTML='<div class="fmt-wrap"><header class="fmt-heading"><div><span class="fmt-eyebrow">First mile / HUB breakdown</span><h2>HUB backlog breakdown</h2><p>Aging by channel and pre-order status for each supplied HUB.</p></div><button type="button" id="fmtValExport" class="fmt-btn fmt-btn-primary">Export filtered CSV</button></header><div class="fmt-snapshot"><span><b>'+esc(meta.rule||'Validation rule unavailable')+'</b></span><span>'+esc(meta.note||'')+'</span><span>'+all.length+' supplied HUBs · aggregate snapshot</span></div>'+toolbar(detail,all,'fmtVal')+'<div class="fmt-breakdown-row"><span class="fmt-control-label">View breakdown</span><div class="fmt-segment-tabs" role="group" aria-label="Breakdown type">'+button('Channels','data-fmt-detail','channels',detail.mode)+button('Pre-order status','data-fmt-detail','preorder',detail.mode)+'</div></div><div id="fmtDetailReport"></div><p class="fmt-note">This view contains HUB aggregates, not individual shipment records.</p></div>';
+    function update(){
+      var rows=all.filter(function(r){return match(r,detail)});
+      detail.limit=detail.limit||15;
+      var shown=rows.slice(0,detail.limit);
+      var list=detail.mode==='channels'?Object.keys(channels).map(function(k){return [k,k.toUpperCase()]}):[['nonPreorder','Non-preorder'],['preorder','Pre-order']];
+      if(!list.some(function(item){return item[0]===detail.channel}))detail.channel=list[0][0];
+      container.querySelectorAll('[data-fmt-detail]').forEach(function(b){b.setAttribute('aria-pressed',String(b.dataset.fmtDetail===detail.mode))});
+      container.querySelector('#fmtValCount').textContent=rows.length+' matching HUBs';
+      var cols=agingColumns(detail.channel);cols.push({label:detail.mode==='channels'?'All channels ≥2d':'Combined ≥2d',cls:'fmt-col-total',cell:function(r){return display(detail.mode==='channels'?r.totalCombine:r.preorderCombine)}});
+      var tools=switches(list,'data-fmt-detail-channel',detail.channel,'Channel or preorder status'),title=detail.mode==='channels'?channels[detail.channel]:(detail.channel==='preorder'?'Pre-order':'Non-preorder');
+      var pager=trackerPager(rows.length,shown.length);
+      container.querySelector('#fmtDetailReport').innerHTML=panel('HUB aging · '+title,'Ages are split into 2d, 3d, 4d and >4d · unit: orders',tools,table(shown,cols,'HUB backlog breakdown')+pager);
+      container.querySelectorAll('[data-fmt-detail]').forEach(function(b){b.onclick=function(){detail.mode=b.dataset.fmtDetail;detail.limit=15;detail.page=1;update()}});
+      container.querySelectorAll('[data-fmt-detail-channel]').forEach(function(b){b.onclick=function(){detail.channel=b.dataset.fmtDetailChannel;update();container.querySelector('[data-fmt-detail-channel="'+detail.channel+'"]').focus()}});
+      container.querySelectorAll('#fmtDetailReport [data-fmt-action]').forEach(function(b){
+        b.onclick=function(){
+          var action=b.dataset.fmtAction;
+          if(action==='more'||action==='next'){detail.limit=Math.min(rows.length,(detail.limit||15)+15)}
+          else if(action==='all'||action==='last'){detail.limit=rows.length}
+          else if(action==='less'||action==='first'){detail.limit=15;var scroll=container.querySelector('#fmtDetailReport .fmt-table-scroll');if(scroll)scroll.scrollTop=0}
+          update();
+          var focusBtn=container.querySelector('#fmtDetailReport [data-fmt-action="'+action+'"]')||container.querySelector('#fmtDetailReport .fmt-table-scroll');
+          if(focusBtn)focusBtn.focus({preventScroll:true});
+        };
+      });
+      container.querySelector('#fmtValExport').onclick=function(){exportDetails(rows,detail.mode)};
+    }
+    bindFilters(container,detail,'fmtVal',update);update();
+    container._fmtRefresh=function(){
+      var previousZones=JSON.stringify(Array.from(new Set(all.map(function(r){return r.zone}))).sort());
+      all=getData().hubDetails||[];meta=getData().validationMeta||{};
+      if(JSON.stringify(Array.from(new Set(all.map(function(r){return r.zone}))).sort())!==previousZones){if(!all.some(function(r){return r.zone===detail.zone}))detail.zone='ALL';var vz=container.querySelector('#fmtValZone');if(vz)vz.innerHTML=options(all,detail.zone)}
+      container.querySelector('.fmt-snapshot').innerHTML='<span><b>'+esc(meta.rule||'Validation rule unavailable')+'</b></span><span>'+esc(meta.note||'')+'</span><span>'+all.length+' supplied HUBs · aggregate snapshot</span>';update();
+    };
+    container._fmtDispose=function(){container._fmtRefresh=null;container._fmtDispose=null};
+  };
+  function quote(v){var s=String(v==null?'':v);if(/^\s*[=+@\-]/.test(s))s="'"+s;return '"'+s.replace(/"/g,'""')+'"'}
+  function download(rows,name){var blob=new Blob(['\uFEFF'+rows.map(function(r){return r.map(quote).join(',')}).join('\r\n')],{type:'text/csv;charset=utf-8'}),url=URL.createObjectURL(blob),a=document.createElement('a');a.href=url;a.download=name;document.body.appendChild(a);a.click();a.remove();setTimeout(function(){URL.revokeObjectURL(url)},1000)}
+  function fields(keys){return keys.reduce(function(a,ch){return a.concat(['d2','d3','d4','dgt4','total'].map(function(k){return ch+'_'+k}))},[])}
+  function channelValues(row,keys){return keys.reduce(function(a,ch){return a.concat(['d2','d3','d4','dgt4','total'].map(function(k){return (row[ch]||{})[k]}))},[])}
+  function exportTracker(hubs,zones){var ch=['mp','rv','nss'],header=['Scope','Rank','Zone','HUB'].concat(fields(ch),['Total ≥2d','Morning ≥4d','Current ≥4d','D0 ≥4d','D−1 ≥4d','W0 ≥4d','W−1 ≥4d','Scope share ≥4d','Cumulative share']),rows=[header];zones.concat(hubs).forEach(function(r){rows.push([r.hubName?(r.isPriority?'Priority HUB':'HUB'):'Zone',r.rank,r.zone,r.hubName].concat(channelValues(r,ch),[r.totalCombine,(r.d0MorningNow||{}).morning,(r.d0MorningNow||{}).now,(r.d0VsDMinus1||{}).d0,(r.d0VsDMinus1||{}).dMinus1,(r.w0VsWMinus1||{}).w0,(r.w0VsWMinus1||{}).wMinus1,r.sharePct,r.cumulativePct]))});download(rows,'FM_Pending_PU_Filtered_Snapshot.csv')}
+  function exportDetails(hubs,mode){var ch=mode==='channels'?['mp','rv','nss']:['nonPreorder','preorder'];download([['Zone','HUB'].concat(fields(ch),['Combined ≥2d'])].concat(hubs.map(function(r){return [r.zone,r.hubName].concat(channelValues(r,ch),[mode==='channels'?r.totalCombine:r.preorderCombine])})),'FM_HUB_'+mode+'_Filtered_Snapshot.csv')}
+})();
+</script>

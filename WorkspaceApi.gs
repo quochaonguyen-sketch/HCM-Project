@@ -52,7 +52,21 @@ function workspaceD0NamedRows_(access, names) {
       return hub ? [Object.assign({},row,{hub_code:hub.code,zone:hub.zone,aom:hub.aom,sup:hub.sup})] : [];
     });
   });
-  return {sheets:sheets,hubCatalog:catalog,access:toPublicAccess_(access,getPermissionModel_(false)),generatedAt:new Date().toISOString()};
+  let todayForecast = null;
+  try {
+    if (typeof dtcAlertReadFc_ === 'function' && typeof dtcExtractTodayForecast_ === 'function') {
+      const fcSource = dtcAlertReadFc_(db, false);
+      if (fcSource && fcSource.values) {
+        let reportDate = '';
+        (sheets['FM Order Volume D0'] || []).forEach(r => { const d = String(r.snapshot_date || r.event_date_iso || '').slice(0, 10); if (d > reportDate) reportDate = d; });
+        if (!reportDate) {
+          (sheets['LM Order Volume D0'] || []).forEach(r => { const d = String(r.fetched_at || '').slice(0, 10); if (d > reportDate) reportDate = d; });
+        }
+        todayForecast = dtcExtractTodayForecast_(fcSource.values, catalog, reportDate);
+      }
+    }
+  } catch (_) {}
+  return {sheets:sheets,hubCatalog:catalog,todayForecast:todayForecast,access:toPublicAccess_(access,getPermissionModel_(false)),generatedAt:new Date().toISOString()};
 }
 function getD0Snapshot(force, section) {
   if (section === 'hourly') return getD0HourlySnapshot(force);

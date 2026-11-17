@@ -252,6 +252,49 @@
 .flmp-roster-badge.badge-lastwork { background: #fff3ef; color: #de350b; }
 .flmp-roster-badge.badge-exited { background: #f1f5f9; color: #64748b; }
 .flmp-roster-badge.badge-unknown { background: #eae6ff; color: #6554c0; }
+/* FLMP 2 Details Section */
+.flmp-details-section {
+  margin-top: 24px;
+  background: #fff;
+  border: 1px solid #dfe7f0;
+  border-radius: 12px;
+  padding: 20px;
+  box-shadow: 0 1px 3px rgba(0,0,0,0.02);
+}
+.flmp-details-title {
+  font-size: 16px;
+  font-weight: 700;
+  color: #0b2343;
+  margin: 0 0 4px;
+}
+.flmp-details-controls {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+  margin: 14px 0;
+}
+.flmp-details-select {
+  height: 36px;
+  padding: 0 12px;
+  font-size: 13px;
+  font-weight: 500;
+  color: #0b2343;
+  background: #f8fafc;
+  border: 1px solid #cbd5e1;
+  border-radius: 6px;
+  outline: none;
+  cursor: pointer;
+}
+.flmp-details-select:focus {
+  border-color: #0052cc;
+  box-shadow: 0 0 0 2px rgba(0,82,204,0.12);
+}
+.flmp-details-table th, .flmp-details-table td {
+  padding: 10px 14px !important;
+  font-size: 13px;
+}
+
 .flmp-pagination { display: flex; align-items: center; justify-content: space-between; padding-top: 8px; font-size: 12px; color: #64748b; }
 .flmp-page-btn { padding: 4px 10px; border: 1px solid #cbd5e1; border-radius: 4px; background: #fff; font-size: 12px; cursor: pointer; }
 .flmp-page-btn:disabled { opacity: 0.4; cursor: not-allowed; }
@@ -294,23 +337,10 @@ window.FLM_PeopleModule = (function () {
     return String(s || '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
   }
 
-  function exportRosterCsv(rows, station, moduleName) {
-    var header = ['STT', 'Mã nhân viên', 'Họ và tên', 'Vị trí', 'Hub', 'Ngày nhận việc', 'Ngày làm việc cuối', 'Trạng thái', 'Chất lượng'];
-    var lines = [header.join(',')];
-    rows.forEach(function (r, i) {
-      var statusLabel = r.status === 'ACTIVE' ? 'Đang làm việc' : (r.status === 'EXITED' ? 'Đã nghỉ việc' : (r.status === 'NOT_JOINED' ? 'Chưa nhận việc' : 'Chưa xác định'));
-      lines.push([
-        i + 1,
-        '"' + (r.employee_id || '') + '"',
-        '"' + (r.employee_name || '') + '"',
-        '"' + (r.position || '') + '"',
-        '"' + (r.station || '') + '"',
-        '"' + (r.join_date || '') + '"',
-        '"' + (r.last_work_date || '') + '"',
-        '"' + statusLabel + '"',
-        '"' + (r.quality || '') + '"'
-      ].join(','));
-    });
+  function exportRosterCsv(rows, shifts, station, moduleName, anchorDate, hubCode) {
+    var quote = function(value) { var text=String(value==null?'':value);if (/^\s*[=+@\-]/.test(text)) text="'"+text;return '"'+text.replace(/"/g,'""')+'"'; };
+    var lines = [['Mã nhân sự','Họ tên','Vị trí','Loại nhân viên','Mã Hub','Hub','Ngày nhận việc','Ngày làm cuối','Trạng thái'].map(quote).join(',')];
+    (rows||[]).forEach(function(row) { lines.push([row.employee_id,row.employee_name,row.position,row.contract_type,row.hub_code||hubCode,row.station||station,row.join_date,row.last_work_date,row.status].map(quote).join(',')); });
     var csvContent = '\uFEFF' + lines.join('\r\n');
     var blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
     var url = URL.createObjectURL(blob);
@@ -321,6 +351,563 @@ window.FLM_PeopleModule = (function () {
     a.click();
     document.body.removeChild(a);
     URL.revokeObjectURL(url);
+  }
+
+  function exportHubSummaryCsv(rows, isRider, anchor) {
+    var header = [
+      'STT',
+      'Mã Hub',
+      'Tên Hub',
+      'Đang làm việc',
+      'Nhận việc trong kỳ',
+      'Nghỉ việc/Làm việc cuối trong kỳ',
+      'Biến động ròng',
+      'Đã nghỉ trước kỳ',
+      'Chưa xác định',
+      'Tỷ lệ nghỉ việc (%)',
+      'Tỷ lệ nhận việc (%)'
+    ];
+    var quote = function(v) {
+      var s = v == null ? '' : String(v);
+      if (/^\s*[=+@\-]/.test(s)) s = "'" + s;
+      return '"' + s.replace(/"/g, '""') + '"';
+    };
+    var lines = [header.map(quote).join(',')];
+    (rows || []).forEach(function(r, idx) {
+      var active = Number(r.active || 0);
+      var joined = Number(r.joined_period != null ? r.joined_period : (r.joined != null ? r.joined : 0));
+      var lastWork = Number(r.last_work_day_period != null ? r.last_work_day_period : (r.last_work != null ? r.last_work : 0));
+      var netChange = r.net_change != null ? Number(r.net_change) : (joined - lastWork);
+      var exited = Number(r.exited_before_anchor != null ? r.exited_before_anchor : (r.exited_before_period != null ? r.exited_before_period : 0));
+      var unknown = Number(r.unknown_records != null ? r.unknown_records : (r.unknown_status != null ? r.unknown_status : 0));
+      var turnover = r.turnover_rate != null ? (Number(r.turnover_rate) * 100).toFixed(2) + '%' : (active > 0 ? ((lastWork / active) * 100).toFixed(2) + '%' : '0.00%');
+      var join = r.join_rate != null ? (Number(r.join_rate) * 100).toFixed(2) + '%' : (active > 0 ? ((joined / active) * 100).toFixed(2) + '%' : '0.00%');
+      lines.push([
+        idx + 1,
+        quote(r.hubCode || r.stationCode || r.code || ''),
+        quote(r.station || r.name || ''),
+        active,
+        joined,
+        lastWork,
+        netChange,
+        exited,
+        unknown,
+        quote(turnover),
+        quote(join)
+      ].join(','));
+    });
+    var csvContent = '\uFEFF' + lines.join('\r\n');
+    var blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
+    var url = URL.createObjectURL(blob);
+    var a = document.createElement('a');
+    a.href = url;
+    a.download = (isRider ? 'Rider' : 'FTE') + '_Hub_Summary_' + (anchor || 'period') + '.csv';
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    URL.revokeObjectURL(url);
+  }
+
+  function createRosterView(container, hubRow, p, initialRows) {
+    if (p.canViewEmployeeDetails !== true) { container.append(el('p','Tài khoản chỉ được xem số liệu tổng hợp, chưa có quyền xem hồ sơ nhân sự.','flmp-warning'));return; }
+    var isRider = p.module === 'RIDER';
+    var rosterLoaded = !!initialRows;
+    var rosterRows = initialRows || [];
+    var shiftsData = [];
+    var rosterSummaryData = null;
+    var rosterFilter = 'ALL';
+    var rosterSearch = '';
+    var rosterPage = 1;
+    var pageSize = 15;
+
+    var rosterNoticeBox = el('div', null, 'flmp-roster-notice-box');
+    var rosterShiftsCard = el('div', null, 'flmp-roster-shifts-card');
+    var rosterControls = el('div', null, 'flmp-roster-controls');
+    var pillsContainer = el('div', null, 'flmp-roster-pills');
+    var statusPills = [
+      { key: 'ALL', label: 'Tất cả' },
+      { key: 'ACTIVE', label: 'Đang làm việc' },
+      { key: 'EXITED', label: 'Đã nghỉ việc' },
+      { key: 'UNKNOWN', label: 'Chưa xác định' }
+    ];
+    var periodPills = [
+      { key: 'JOINED_PERIOD', label: '+ Mới nhận việc' },
+      { key: 'LAST_WORK_PERIOD', label: 'Ngày làm cuối' }
+    ];
+
+    function isRecentJoined(r) {
+      if (!r) return false;
+      var jDate = r.join_date;
+      if (jDate && jDate !== '-') {
+        var jStr = String(jDate).slice(0, 10);
+        if (/^\d{4}-\d{2}-\d{2}$/.test(jStr)) {
+          var aStr = (p && p.anchor && String(p.anchor).slice(0, 10)) || (hubRow && hubRow.anchorDate && String(hubRow.anchorDate).slice(0, 10)) || (new Date()).toISOString().slice(0, 10);
+          var diff = Math.floor((Date.parse(aStr + 'T00:00:00Z') - Date.parse(jStr + 'T00:00:00Z')) / 86400000);
+          return diff >= 0 && diff <= 30;
+        }
+      }
+      return r.is_joined_period === true || r.is_joined_period === 'true';
+    }
+
+    function isRecentExited(r) {
+      if (!r) return false;
+      var lDate = r.last_work_date;
+      if (lDate && lDate !== '-') {
+        var lStr = String(lDate).slice(0, 10);
+        if (/^\d{4}-\d{2}-\d{2}$/.test(lStr)) {
+          var aStr = (p && p.anchor && String(p.anchor).slice(0, 10)) || (hubRow && hubRow.anchorDate && String(hubRow.anchorDate).slice(0, 10)) || (new Date()).toISOString().slice(0, 10);
+          var diff = Math.floor((Date.parse(aStr + 'T00:00:00Z') - Date.parse(lStr + 'T00:00:00Z')) / 86400000);
+          return diff >= 0 && diff <= 30;
+        }
+      }
+      return r.is_last_work_period === true || r.is_last_work_period === 'true';
+    }
+
+    function updatePillCounts() {
+      pillsContainer.replaceChildren();
+      var counts = {
+        ALL: rosterRows.length,
+        ACTIVE: rosterRows.filter(function(r) { return r.status === 'ACTIVE'; }).length,
+        JOINED_PERIOD: rosterRows.filter(function(r) { return isRecentJoined(r); }).length,
+        LAST_WORK_PERIOD: rosterRows.filter(function(r) { return isRecentExited(r); }).length,
+        EXITED: rosterRows.filter(function(r) { return r.status === 'EXITED'; }).length,
+        UNKNOWN: rosterRows.filter(function(r) { return r.status === 'UNKNOWN'; }).length
+      };
+
+      statusPills.forEach(function (pd) {
+        var count = counts[pd.key] || 0;
+        var btn = el('button', pd.label + ' (' + count + ')', 'flmp-roster-pill' + (rosterFilter === pd.key ? ' is-active' : ''));
+        btn.onclick = function () {
+          rosterFilter = pd.key;
+          rosterPage = 1;
+          updatePillCounts();
+          renderRosterList();
+        };
+        pillsContainer.append(btn);
+      });
+
+      var sep = el('span', null);
+      sep.style.cssText = 'display:inline-block;width:1px;height:20px;background:#cbd5e1;margin:0 4px;align-self:center;';
+      var periodLabel = el('span', 'Biến động 30 ngày:', null);
+      periodLabel.style.cssText = 'font-size:11px;font-weight:600;color:#64748b;align-self:center;margin:0 2px 0 4px;';
+      pillsContainer.append(sep, periodLabel);
+
+      periodPills.forEach(function (pd) {
+        var count = counts[pd.key] || 0;
+        var btn = el('button', pd.label + ' (' + count + ')', 'flmp-roster-pill flmp-pill-period' + (rosterFilter === pd.key ? ' is-active' : ''));
+        btn.onclick = function () {
+          rosterFilter = pd.key;
+          rosterPage = 1;
+          updatePillCounts();
+          renderRosterList();
+        };
+        pillsContainer.append(btn);
+      });
+    }
+
+    var rSearchBox = el('div', null, 'flmp-roster-search');
+    rSearchBox.innerHTML = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.35-4.35"/></svg>';
+    var rSearchInput = el('input');
+    rSearchInput.type = 'text';
+    rSearchInput.placeholder = isRider ? 'Tìm Mã Rider hoặc Họ tên…' : 'Tìm nhân sự (Tên, Email, Chức vụ)…';
+    rSearchInput.oninput = function () {
+      rosterSearch = rSearchInput.value.trim().toLowerCase();
+      rosterPage = 1;
+      renderRosterList();
+    };
+    rSearchBox.append(rSearchInput);
+
+    var exportBtn = el('button', null, 'flmp-roster-export app-btn-export');
+    exportBtn.innerHTML = '<svg class="app-btn-icon" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg> ' + (isRider ? 'Xuất danh sách Rider (CSV)' : 'Xuất dữ liệu Hub (CSV)');
+    exportBtn.onclick = function () {
+      exportRosterCsv(rosterRows, shiftsData, hubRow.station, isRider ? 'Rider' : 'Staff', p.anchor, hubRow.hubCode || hubRow.stationCode || '');
+    };
+
+    if (isRider) {
+      rosterControls.append(pillsContainer, rSearchBox, exportBtn);
+    } else {
+      rosterControls.append(rSearchBox, exportBtn);
+    }
+    container.append(rosterNoticeBox, rosterShiftsCard, rosterControls);
+
+    var rosterTableWrap = el('div', null, 'flmp-roster-table-wrap');
+    container.append(rosterTableWrap);
+
+    var rosterPagination = el('div', null, 'flmp-pagination');
+    container.append(rosterPagination);
+
+    function renderRosterList() {
+      if (!isRider) {
+        // Dedicated authentic UI for FTE: Shift Breakdown + Hub Management
+        renderFteView();
+        return;
+      }
+
+      var filtered = rosterRows.filter(function (r) {
+        if (rosterFilter === 'ACTIVE' && r.status !== 'ACTIVE') return false;
+        if (rosterFilter === 'JOINED_PERIOD' && !isRecentJoined(r)) return false;
+        if (rosterFilter === 'LAST_WORK_PERIOD' && !isRecentExited(r)) return false;
+        if (rosterFilter === 'EXITED' && r.status !== 'EXITED') return false;
+        if (rosterFilter === 'UNKNOWN' && r.status !== 'UNKNOWN') return false;
+        if (rosterSearch &&
+            String(r.employee_id || '').toLowerCase().indexOf(rosterSearch) === -1 &&
+            String(r.employee_name || '').toLowerCase().indexOf(rosterSearch) === -1) {
+          return false;
+        }
+        return true;
+      });
+
+      var totalPages = Math.max(1, Math.ceil(filtered.length / pageSize));
+      if (rosterPage > totalPages) rosterPage = totalPages;
+      var startIdx = (rosterPage - 1) * pageSize;
+      var pageItems = filtered.slice(startIdx, startIdx + pageSize);
+
+      rosterTableWrap.replaceChildren();
+      var table = el('table', null, 'flmp-roster-table');
+      table.innerHTML = '<thead><tr>' +
+        '<th style="width:40px;">STT</th>' +
+        '<th>Mã Rider</th>' +
+        '<th>Họ và tên Rider</th>' +
+        '<th>Loại HĐ / Đơn vị</th>' +
+        '<th>Ngày nhận việc</th>' +
+        '<th>Ngày làm cuối</th>' +
+        '<th>Trạng thái</th>' +
+        '</tr></thead>';
+
+      var tb = el('tbody');
+      if (!pageItems.length) {
+        var trEmpty = el('tr');
+        var tdEmpty = el('td', 'Không có hồ sơ Rider nào phù hợp bộ lọc');
+        tdEmpty.colSpan = 7;
+        tdEmpty.style.textAlign = 'center';
+        tdEmpty.style.padding = '24px';
+        tdEmpty.style.color = '#64748b';
+        trEmpty.append(tdEmpty);
+        tb.append(trEmpty);
+      } else {
+        pageItems.forEach(function (r, i) {
+          var tr = el('tr');
+          var statusLabel = {ACTIVE:'Đang làm việc',EXITED:'Đã nghỉ việc',NOT_JOINED:'Chưa nhận việc',UNKNOWN:'Chưa xác định'}[r.status] || 'Chưa xác định';
+          var statusHtml = '<span class="flmp-roster-badge">'+elEscape(statusLabel)+'</span>';
+          if (isRecentJoined(r)) {
+            statusHtml += ' <span class="flmp-roster-badge badge-joined" title="Mới nhận việc (trong 30 ngày)">+ Mới nhận việc</span>';
+          }
+          tr.innerHTML = '<td>' + (startIdx + i + 1) + '</td>' +
+            '<td style="font-weight:600;font-family:monospace;color:#0b2343;">' + elEscape(r.employee_id) + '</td>' +
+            '<td style="font-weight:600;color:#1e293b;">' + elEscape(r.employee_name || 'Chưa cập nhật') + '</td>' +
+            '<td>' + elEscape(r.contract_type || r.position || 'Full-Time') + '</td>' +
+            '<td>'+elEscape(r.join_date||'—')+'</td>' +
+            '<td>'+elEscape(r.last_work_date||'—')+'</td>' +
+            '<td>' + statusHtml + '</td>';
+          tb.append(tr);
+        });
+      }
+      table.append(tb);
+      rosterTableWrap.append(table);
+
+      renderRosterPagination(filtered.length,renderRosterList);
+    }
+
+    function renderRosterPagination(total,redraw) {
+      var startIdx=(rosterPage-1)*pageSize,totalPages=Math.max(1,Math.ceil(total/pageSize));
+      rosterPagination.replaceChildren();
+      var countInfo = el('span', 'Hiển thị ' + (total ? (startIdx + 1) : 0) + '–' + Math.min(startIdx + pageSize, total) + ' trên ' + total + (isRider?' Rider':' nhân sự'));
+      var btnGroup = el('div', null, 'flmp-page-btn-group');
+      var prevBtn = el('button', '← Trước', 'flmp-page-btn');
+      prevBtn.disabled = rosterPage <= 1;
+      prevBtn.onclick = function () {
+        if (rosterPage > 1) {
+          rosterPage--;
+          redraw();
+        }
+      };
+
+      var pageLabel = el('span', ' ' + rosterPage + ' / ' + totalPages + ' ', null);
+      pageLabel.style.margin = '0 8px';
+
+      var nextBtn = el('button', 'Sau →', 'flmp-page-btn');
+      nextBtn.disabled = rosterPage >= totalPages;
+      nextBtn.onclick = function () {
+        if (rosterPage < totalPages) {
+          rosterPage++;
+          redraw();
+        }
+      };
+
+      btnGroup.append(prevBtn, pageLabel, nextBtn);
+      rosterPagination.append(countInfo, btnGroup);
+    }
+
+    var ftePosFilter = 'ALL';
+
+    function renderFteView() {
+      rosterTableWrap.replaceChildren();
+
+      // Count positions
+      var cSup = 0, cLead = 0, cStaff = 0, cOther = 0;
+      rosterRows.forEach(function(r) {
+        var p = String(r.position || r.role_label || '').toUpperCase();
+        if (p.indexOf('SUP') >= 0 || p.indexOf('SUPERVISOR') >= 0) cSup++;
+        else if (p.indexOf('LEAD') >= 0) cLead++;
+        else if (p.indexOf('STAFF') >= 0) cStaff++;
+        else cOther++;
+      });
+
+      // Filter management rows by search and position
+      var mgmtRows = rosterRows.filter(function(r) {
+        var p = String(r.position || r.role_label || '').toUpperCase();
+        if (ftePosFilter === 'SUP' && p.indexOf('SUP') < 0 && p.indexOf('SUPERVISOR') < 0) return false;
+        if (ftePosFilter === 'LEAD' && p.indexOf('LEAD') < 0) return false;
+        if (ftePosFilter === 'STAFF' && p.indexOf('STAFF') < 0) return false;
+
+        if (!rosterSearch) return true;
+        var s = rosterSearch.toLowerCase();
+        return String(r.employee_name || '').toLowerCase().indexOf(s) >= 0 ||
+               String(r.employee_id || '').toLowerCase().indexOf(s) >= 0 ||
+               String(r.email || '').toLowerCase().indexOf(s) >= 0 ||
+               String(r.position || r.role_label || '').toLowerCase().indexOf(s) >= 0;
+      });
+
+      var totalPages=Math.max(1,Math.ceil(mgmtRows.length/pageSize));
+      rosterPage=Math.min(rosterPage,totalPages);
+      var startIdx=(rosterPage-1)*pageSize,shownRows=mgmtRows.slice(startIdx,startIdx+pageSize);
+      var mgmtBox = el('div');
+      mgmtBox.style.cssText = 'margin-top:14px;background:#fff;border:1px solid #e2e8f0;border-radius:8px;overflow:hidden;';
+
+      var mgmtHead = el('div');
+      mgmtHead.style.cssText = 'padding:12px 16px;background:#f8fafc;border-bottom:1px solid #e2e8f0;display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:8px;';
+      mgmtHead.innerHTML = '<div style="font-size:13px;font-weight:700;color:#0f172a;display:flex;align-items:center;gap:6px;">' +
+        '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#0052cc" stroke-width="2"><path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M22 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg>' +
+        'Danh sách nhân sự từ tab staff' +
+        '</div>' +
+        '<span style="font-size:11px;color:#64748b;font-weight:600;">' + mgmtRows.length + ' / ' + rosterRows.length + ' nhân sự</span>';
+      mgmtBox.append(mgmtHead);
+
+      // Position filter toolbar
+      var posToolbar = el('div');
+      posToolbar.style.cssText = 'padding:10px 16px;background:#fff;border-bottom:1px solid #e2e8f0;display:flex;align-items:center;gap:8px;flex-wrap:wrap;';
+      posToolbar.innerHTML = '<span style="font-size:12px;font-weight:600;color:#64748b;margin-right:4px;">Lọc vị trí:</span>' +
+        '<button type="button" class="flmp-roster-pill ' + (ftePosFilter === 'ALL' ? 'is-active' : '') + '" data-pos-filter="ALL">Tất cả (' + rosterRows.length + ')</button>' +
+        '<button type="button" class="flmp-roster-pill ' + (ftePosFilter === 'SUP' ? 'is-active' : '') + '" data-pos-filter="SUP" style="border-color:#ddd6fe;' + (ftePosFilter === 'SUP' ? 'background:#6d28d9;' : 'color:#6d28d9;') + '">⭐ SUP (' + cSup + ')</button>' +
+        '<button type="button" class="flmp-roster-pill ' + (ftePosFilter === 'LEAD' ? 'is-active' : '') + '" data-pos-filter="LEAD" style="border-color:#fde68a;' + (ftePosFilter === 'LEAD' ? 'background:#b45309;' : 'color:#b45309;') + '">🎖️ LEAD (' + cLead + ')</button>' +
+        '<button type="button" class="flmp-roster-pill ' + (ftePosFilter === 'STAFF' ? 'is-active' : '') + '" data-pos-filter="STAFF" style="border-color:#bae6fd;' + (ftePosFilter === 'STAFF' ? 'background:#0369a1;' : 'color:#0369a1;') + '">👤 STAFF (' + cStaff + ')</button>';
+      posToolbar.querySelectorAll('[data-pos-filter]').forEach(function(btn) {
+        btn.onclick = function() {
+          ftePosFilter = this.dataset.posFilter;
+          rosterPage=1;
+          renderFteView();
+        };
+      });
+      mgmtBox.append(posToolbar);
+
+      var mgmtTableWrap = el('div', null, 'flmp-roster-table-wrap');
+      var mgmtTable = el('table', null, 'flmp-roster-table');
+      mgmtTable.innerHTML = '<thead><tr>' +
+        '<th style="width:40px;">STT</th>' +
+        '<th>Mã nhân sự</th>' +
+        '<th>Họ và tên</th>' +
+        '<th>Vị trí (Position)</th>' +
+        '<th>Ngày nhận việc</th>' +
+        '<th>Ngày làm cuối</th>' +
+        '<th>Trạng thái</th>' +
+        '</tr></thead>';
+
+      var mgmtTb = el('tbody');
+      if (!mgmtRows.length) {
+        var trEmpty = el('tr');
+        var tdEmpty = el('td', 'Không có nhân sự nào phù hợp bộ lọc');
+        tdEmpty.colSpan = 7;
+        tdEmpty.style.textAlign = 'center';
+        tdEmpty.style.padding = '20px';
+        tdEmpty.style.color = '#64748b';
+        trEmpty.append(tdEmpty);
+        mgmtTb.append(trEmpty);
+      } else {
+        shownRows.forEach(function(r, idx) {
+          var tr = el('tr');
+          var role = String(r.position || r.role_label || 'STAFF').trim().toUpperCase();
+          var roleBg = '#e0f2fe', roleColor = '#0369a1', roleBorder = '#bae6fd', roleIcon = '👤';
+          if (role.indexOf('SUP') >= 0 || role.indexOf('SUPERVISOR') >= 0) {
+            role = 'SUP';
+            roleBg = '#ede9fe'; roleColor = '#6d28d9'; roleBorder = '#ddd6fe'; roleIcon = '⭐';
+          } else if (role.indexOf('LEAD') >= 0) {
+            role = 'LEAD';
+            roleBg = '#fef3c7'; roleColor = '#b45309'; roleBorder = '#fde68a'; roleIcon = '🎖️';
+          } else if (role.indexOf('STAFF') >= 0) {
+            role = 'STAFF';
+            roleBg = '#e0f2fe'; roleColor = '#0369a1'; roleBorder = '#bae6fd'; roleIcon = '👤';
+          } else if (role === 'SAOM') {
+            roleBg = '#fce7f3'; roleColor = '#be185d'; roleBorder = '#fbcfe8'; roleIcon = '🏢';
+          } else if (role === 'AOM') {
+            roleBg = '#dbeafe'; roleColor = '#1d4ed8'; roleBorder = '#bfdbfe'; roleIcon = '👔';
+          }
+
+          var roleBadge = '<span class="flmp-roster-badge" style="background:' + roleBg + ';color:' + roleColor + ';border:1px solid ' + roleBorder + ';font-weight:700;letter-spacing:0.3px;">' + roleIcon + ' ' + elEscape(role) + '</span>';
+
+          var statusBadge = '<span class="flmp-roster-badge badge-active">Đang làm việc</span>';
+          if (r.status === 'EXITED') {
+            statusBadge = '<span class="flmp-roster-badge badge-last">Đã nghỉ việc</span>';
+          } else if (r.status === 'UNKNOWN') {
+            statusBadge = '<span class="flmp-roster-badge">Chưa xác định</span>';
+          } else if (r.status === 'NOT_JOINED') {
+            statusBadge = '<span class="flmp-roster-badge badge-joined">Chưa nhận việc</span>';
+          } else if (isRecentJoined(r)) {
+            statusBadge += ' <span class="flmp-roster-badge badge-joined" title="Mới nhận việc (trong 30 ngày)">+ Mới nhận việc</span>';
+          }
+
+          var joinDateDisp = r.join_date ? elEscape(String(r.join_date).slice(0, 10)) : '-';
+          var lastDateDisp = r.last_work_date ? elEscape(String(r.last_work_date).slice(0, 10)) : '-';
+
+          tr.innerHTML = '<td>' + (startIdx + idx + 1) + '</td>' +
+            '<td style="font-weight:600;font-family:monospace;color:#0b2343;">' + elEscape(r.employee_id || '-') + '</td>' +
+            '<td style="font-weight:700;color:#0f172a;">' + elEscape(r.employee_name || 'Chưa cập nhật') + '</td>' +
+            '<td>' + roleBadge + '</td>' +
+            '<td style="font-size:12px;color:#475569;">' + joinDateDisp + '</td>' +
+            '<td style="font-size:12px;color:#64748b;">' + lastDateDisp + '</td>' +
+            '<td>' + statusBadge + '</td>';
+          mgmtTb.append(tr);
+        });
+      }
+      mgmtTable.append(mgmtTb);
+      mgmtTableWrap.append(mgmtTable);
+      mgmtBox.append(mgmtTableWrap);
+
+      rosterTableWrap.append(mgmtBox);
+      renderRosterPagination(mgmtRows.length,renderFteView);
+    }
+
+    if (rosterLoaded && rosterRows.length) {
+      if (isRider) updatePillCounts();
+      renderRosterList();
+    } else {
+      rosterTableWrap.replaceChildren();
+      var loadDiv = el('div', null, 'flmp-loading');
+      loadDiv.innerHTML = '<div class="flmp-spinner"></div><p>Đang tải dữ liệu nhân sự tại ' + elEscape(hubRow.station) + '…</p>';
+      rosterTableWrap.append(loadDiv);
+
+      google.script.run
+        .withSuccessHandler(function (res) {
+          rosterLoaded = true;
+          rosterRows = (res && res.rows) || [];
+          shiftsData = (res && res.shifts) || [];
+          rosterSummaryData = (res && res.rosterSummary) || null;
+          var shifts = shiftsData;
+          var rSum = rosterSummaryData;
+          var notice = (res && res.notice) || '';
+
+          // 1. Notice banner for authentic data transparency
+          rosterNoticeBox.replaceChildren();
+          if (notice) {
+            var nb = el('div', null, 'flmp-roster-notice');
+            nb.style.cssText = 'margin-bottom:12px;padding:10px 14px;background:#f0f9ff;border:1px solid #bae6fd;border-radius:8px;font-size:12px;color:#0369a1;display:flex;align-items:flex-start;gap:8px;line-height:1.45;';
+            nb.innerHTML = '<span style="font-size:15px;line-height:1.2;">ℹ️</span><div><strong>Nguồn dữ liệu thực tế:</strong> ' + elEscape(notice) + '</div>';
+            rosterNoticeBox.append(nb);
+          }
+
+          // 2. Operational shifts card from Roster Shifts D0
+          rosterShiftsCard.replaceChildren();
+          if (!isRider && shifts && shifts.length > 0) {
+            var sc = el('div');
+            sc.style.cssText = 'margin-bottom:14px;background:#fff;border:1px solid #e2e8f0;border-radius:8px;overflow:hidden;';
+            var sumText = rSum ? ('Có mặt: <b>' + formatNum(rSum.present_count) + '</b> / Kế hoạch: ' + formatNum(rSum.scheduled_count) + ' (FTE: <b>' + formatNum(rSum.fte_count) + '</b>, BPO: <b>' + formatNum(rSum.bpo_count) + '</b>, OS: <b>' + formatNum(rSum.os_count) + '</b>)') : (shifts.length + ' ca trực vận hành');
+            var headerHtml = '<div style="padding:12px 16px;background:#f8fafc;border-bottom:1px solid #e2e8f0;font-size:13px;font-weight:700;color:#0f172a;display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:6px;">' +
+              '<span>📋 Phân bổ Nhân sự Thực tế theo Ca trực (Roster Shifts D0)</span>' +
+              '<span style="font-size:12px;font-weight:normal;color:#475569;">' + sumText + '</span></div>';
+
+            var sTableWrap = el('div', null, 'flmp-scroll');
+            sTableWrap.style.margin = '0';
+            var sTable = el('table', null, 'flmp-roster-table');
+            sTable.innerHTML = '<thead><tr>' +
+              '<th style="width:40px;">STT</th>' +
+              '<th>Ca làm việc</th>' +
+              '<th style="text-align:right;">Kế hoạch</th>' +
+              '<th style="text-align:right;color:#0052cc;">Thực tế có mặt</th>' +
+              '<th style="text-align:right;">FTE (Chính thức)</th>' +
+              '<th style="text-align:right;">BPO (Thuê ngoài)</th>' +
+              '<th style="text-align:right;">OS (Thời vụ)</th>' +
+              '<th style="text-align:center;">Nam / Nữ</th>' +
+              '<th style="text-align:right;">Tăng ca OT</th>' +
+              '<th style="text-align:center;">Trạng thái khớp</th>' +
+              '</tr></thead>';
+
+            var sTb = el('tbody');
+            var totPlanned = 0, totActual = 0, totFte = 0, totBpo = 0, totOs = 0, totMale = 0, totFemale = 0, totOtPeople = 0, totOtHours = 0;
+
+            shifts.forEach(function(s, sIdx) {
+              totPlanned += Number(s.planned_people || 0);
+              totActual += Number(s.actual_people || 0);
+              totFte += Number(s.actual_fte || 0);
+              totBpo += Number(s.actual_bpo || 0);
+              totOs += Number(s.actual_os || 0);
+              totMale += Number(s.male_count || 0);
+              totFemale += Number(s.female_count || 0);
+              totOtPeople += Number(s.ot_people || 0);
+              totOtHours += Number(s.ot_hours || 0);
+
+              var statBadge = s.classification_status === 'Khớp'
+                ? '<span style="background:#e3fcef;color:#00875a;padding:2px 8px;border-radius:10px;font-size:11px;font-weight:700;">Khớp</span>'
+                : '<span style="background:#fff0b3;color:#172b4d;padding:2px 8px;border-radius:10px;font-size:11px;font-weight:700;">' + elEscape(s.classification_status || 'Khác') + '</span>';
+
+              var otDisplay = s.ot_people > 0
+                ? '<span style="color:#d97706;font-weight:600;">' + s.ot_people + ' người (' + s.ot_hours + 'h)</span>'
+                : '<span style="color:#94a3b8;">0</span>';
+
+              var str = el('tr');
+              str.innerHTML = '<td>' + (sIdx + 1) + '</td>' +
+                '<td style="font-weight:700;color:#0052cc;">' + elEscape(s.shift) + '</td>' +
+                '<td style="text-align:right;font-weight:600;">' + formatNum(s.planned_people) + '</td>' +
+                '<td style="text-align:right;font-weight:700;color:#0052cc;font-size:13px;">' + formatNum(s.actual_people) + '</td>' +
+                '<td style="text-align:right;font-weight:600;color:#047857;">' + formatNum(s.actual_fte) + '</td>' +
+                '<td style="text-align:right;color:#64748b;">' + formatNum(s.actual_bpo) + '</td>' +
+                '<td style="text-align:right;color:#64748b;">' + formatNum(s.actual_os) + '</td>' +
+                '<td style="text-align:center;font-size:11px;color:#475569;">' + formatNum(s.male_count) + ' Nam / ' + formatNum(s.female_count) + ' Nữ</td>' +
+                '<td style="text-align:right;">' + otDisplay + '</td>' +
+                '<td style="text-align:center;">' + statBadge + '</td>';
+              sTb.append(str);
+            });
+
+            // Footer total row
+            var sTf = el('tfoot');
+            var totTr = el('tr');
+            totTr.style.cssText = 'background:#f1f5f9;font-weight:700;border-top:2px solid #cbd5e1;';
+            totTr.innerHTML = '<td></td>' +
+              '<td>TỔNG CỘNG CA TRỰC</td>' +
+              '<td style="text-align:right;">' + formatNum(totPlanned) + '</td>' +
+              '<td style="text-align:right;color:#0052cc;font-size:13px;">' + formatNum(totActual) + '</td>' +
+              '<td style="text-align:right;color:#047857;">' + formatNum(totFte) + '</td>' +
+              '<td style="text-align:right;">' + formatNum(totBpo) + '</td>' +
+              '<td style="text-align:right;">' + formatNum(totOs) + '</td>' +
+              '<td style="text-align:center;font-size:11px;">' + formatNum(totMale) + ' Nam / ' + formatNum(totFemale) + ' Nữ</td>' +
+              '<td style="text-align:right;color:#d97706;">' + (totOtPeople > 0 ? (totOtPeople + ' ng (' + totOtHours + 'h)') : '0') + '</td>' +
+              '<td style="text-align:center;"><span style="color:#00875a;font-weight:700;">' + (rSum ? (rSum.attendance_pct + '% đi làm') : 'Hoàn thành') + '</span></td>';
+            sTf.append(totTr);
+
+            sTable.append(sTb, sTf);
+            sTableWrap.append(sTable);
+            sc.innerHTML = headerHtml;
+            sc.append(sTableWrap);
+            rosterShiftsCard.append(sc);
+          }
+
+          if (isRider) updatePillCounts();
+          renderRosterList();
+        })
+        .withFailureHandler(function (err) {
+          rosterTableWrap.replaceChildren();
+          var errDiv = el('div', null, 'flmp-warning');
+          errDiv.textContent = 'Không tải được danh sách: ' + String(err.message || err);
+          rosterTableWrap.append(errDiv);
+        })
+        .flmPeopleGetHubRoster({
+          module: p.module,
+          station: hubRow.station,
+          hubCode: hubRow.hubCode || hubRow.stationCode || '',
+          selectedHubCodes: (hubRow.hubCode || hubRow.stationCode) ? [hubRow.hubCode || hubRow.stationCode] : undefined,
+          anchorDate: p.anchor,
+          scopeType: p.scope ? p.scope.type : 'CITY',
+          scopeValue: p.scope ? p.scope.value : 'HCM_CITY'
+        });
+    }
   }
 
   function openHubModal(root, hubRow, p) {
@@ -345,8 +932,9 @@ window.FLM_PeopleModule = (function () {
 
     var modal = el('div', null, 'flmp-modal');
     var head = el('div', null, 'flmp-modal-head');
+    var hubCodeDisplay = hubRow.hubCode || hubRow.stationCode ? ' <span style="font-size:12px;color:#64748b;font-weight:normal;">(' + elEscape(hubRow.hubCode || hubRow.stationCode) + ')</span>' : '';
     head.innerHTML = '<h3><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#0052cc" stroke-width="2"><rect x="3" y="3" width="7" height="7" rx="1.5"/><rect x="14" y="3" width="7" height="7" rx="1.5"/><rect x="3" y="14" width="7" height="7" rx="1.5"/><rect x="14" y="14" width="7" height="7" rx="1.5"/></svg>' +
-      elEscape(hubRow.station) + '</h3>';
+      elEscape(hubRow.station) + hubCodeDisplay + '</h3>';
     var closeBtn = el('button', '×', 'flmp-modal-close');
     closeBtn.onclick = closeHubModal;
     head.append(closeBtn);
@@ -355,7 +943,7 @@ window.FLM_PeopleModule = (function () {
     // Modal Tab Navigation
     var nav = el('div', null, 'flmp-modal-nav');
     var tabOverview = el('button', '📊 Chỉ số & Phân tích', 'flmp-modal-tab is-active');
-    var tabRoster = el('button', '👥 Danh sách nhân sự tại Hub (Raw Data)', 'flmp-modal-tab');
+    var tabRoster = el('button', isRider ? '👥 Danh sách Rider tại Hub' : '👥 Nhân sự từ staff tại Hub', 'flmp-modal-tab');
     nav.append(tabOverview, tabRoster);
     modal.append(nav);
 
@@ -365,7 +953,7 @@ window.FLM_PeopleModule = (function () {
     var viewOverview = el('div');
     var grid = el('div', null, 'flmp-modal-grid');
     grid.innerHTML = '<div class="flmp-modal-stat" style="border-left:4px solid #0052cc;">' +
-      '<small>Đang làm việc</small><strong>' + formatNum(active) + ' ' + (isRider ? 'Rider' : 'Staff') + '</strong></div>' +
+      '<small>Đang làm việc</small><strong>' + formatNum(active) + ' ' + (isRider ? 'Rider' : 'Nhân sự (SUP/LEAD/STAFF)') + '</strong></div>' +
       '<div class="flmp-modal-stat" style="border-left:4px solid #00875a;">' +
       '<small>Nhận việc (30 ngày)</small><strong style="color:#00875a;">+' + formatNum(joined) + '</strong></div>' +
       '<div class="flmp-modal-stat" style="border-left:4px solid #de350b;">' +
@@ -388,200 +976,10 @@ window.FLM_PeopleModule = (function () {
     // Tab 2: Roster / Raw Data
     var viewRoster = el('div');
     viewRoster.style.display = 'none';
-
-    var rosterLoaded = false;
-    var rosterRows = [];
-    var rosterFilter = 'ALL';
-    var rosterSearch = '';
-    var rosterPage = 1;
-    var pageSize = 15;
-
-    var rosterControls = el('div', null, 'flmp-roster-controls');
-    var pillsContainer = el('div', null, 'flmp-roster-pills');
-    var pillDefs = [
-      { key: 'ALL', label: 'Tất cả' },
-      { key: 'ACTIVE', label: 'Đang làm' },
-      { key: 'JOINED_PERIOD', label: 'Nhận việc' },
-      { key: 'LAST_WORK_PERIOD', label: 'Ngày làm cuối' },
-      { key: 'EXITED', label: 'Đã nghỉ' },
-      { key: 'UNKNOWN', label: 'Chưa xác định' }
-    ];
-
-    pillDefs.forEach(function (pd) {
-      var btn = el('button', pd.label, 'flmp-roster-pill' + (rosterFilter === pd.key ? ' is-active' : ''));
-      btn.onclick = function () {
-        rosterFilter = pd.key;
-        rosterPage = 1;
-        pillsContainer.querySelectorAll('.flmp-roster-pill').forEach(function (p, i) {
-          p.classList.toggle('is-active', pillDefs[i].key === rosterFilter);
-        });
-        renderRosterList();
-      };
-      pillsContainer.append(btn);
-    });
-
-    var rSearchBox = el('div', null, 'flmp-roster-search');
-    rSearchBox.innerHTML = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.35-4.35"/></svg>';
-    var rSearchInput = el('input');
-    rSearchInput.type = 'text';
-    rSearchInput.placeholder = 'Tìm Mã NV hoặc Họ tên…';
-    rSearchInput.oninput = function () {
-      rosterSearch = rSearchInput.value.trim().toLowerCase();
-      rosterPage = 1;
-      renderRosterList();
-    };
-    rSearchBox.append(rSearchInput);
-
-    var exportBtn = el('button', null, 'flmp-roster-export');
-    exportBtn.innerHTML = '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg> Xuất CSV';
-    exportBtn.onclick = function () {
-      exportRosterCsv(rosterRows, hubRow.station, isRider ? 'Rider' : 'Staff');
-    };
-
-    rosterControls.append(pillsContainer, rSearchBox, exportBtn);
-    viewRoster.append(rosterControls);
-
-    var rosterTableWrap = el('div', null, 'flmp-roster-table-wrap');
-    viewRoster.append(rosterTableWrap);
-
-    var rosterPagination = el('div', null, 'flmp-pagination');
-    viewRoster.append(rosterPagination);
-
     body.append(viewRoster);
     modal.append(body);
 
-    function renderRosterList() {
-      var filtered = rosterRows.filter(function (r) {
-        if (rosterFilter === 'ACTIVE' && r.status !== 'ACTIVE') return false;
-        if (rosterFilter === 'JOINED_PERIOD' && !r.is_joined_period) return false;
-        if (rosterFilter === 'LAST_WORK_PERIOD' && !r.is_last_work_period) return false;
-        if (rosterFilter === 'EXITED' && r.status !== 'EXITED') return false;
-        if (rosterFilter === 'UNKNOWN' && r.status !== 'UNKNOWN') return false;
-        if (rosterSearch &&
-            String(r.employee_id || '').toLowerCase().indexOf(rosterSearch) === -1 &&
-            String(r.employee_name || '').toLowerCase().indexOf(rosterSearch) === -1) {
-          return false;
-        }
-        return true;
-      });
-
-      var totalPages = Math.max(1, Math.ceil(filtered.length / pageSize));
-      if (rosterPage > totalPages) rosterPage = totalPages;
-      var startIdx = (rosterPage - 1) * pageSize;
-      var pageItems = filtered.slice(startIdx, startIdx + pageSize);
-
-      rosterTableWrap.replaceChildren();
-      var table = el('table', null, 'flmp-roster-table');
-      table.innerHTML = '<thead><tr>' +
-        '<th style="width:40px;">STT</th>' +
-        '<th>Mã nhân viên</th>' +
-        '<th>Họ và tên</th>' +
-        '<th>Vị trí</th>' +
-        '<th>Ngày nhận việc</th>' +
-        '<th>Ngày làm cuối</th>' +
-        '<th>Trạng thái</th>' +
-        '</tr></thead>';
-
-      var tb = el('tbody');
-      if (!pageItems.length) {
-        var trEmpty = el('tr');
-        var tdEmpty = el('td', 'Không có hồ sơ nào phù hợp bộ lọc');
-        tdEmpty.colSpan = 7;
-        tdEmpty.style.textAlign = 'center';
-        tdEmpty.style.padding = '24px';
-        tdEmpty.style.color = '#64748b';
-        trEmpty.append(tdEmpty);
-        tb.append(trEmpty);
-      } else {
-        pageItems.forEach(function (r, i) {
-          var tr = el('tr');
-          var badgeCls = 'badge-active';
-          var badgeText = 'Đang làm việc';
-
-          if (r.is_joined_period) {
-            badgeCls = 'badge-joined';
-            badgeText = 'Nhận việc mới';
-          } else if (r.is_last_work_period) {
-            badgeCls = 'badge-lastwork';
-            badgeText = 'Ngày làm cuối';
-          } else if (r.status === 'EXITED') {
-            badgeCls = 'badge-exited';
-            badgeText = 'Đã nghỉ trước kỳ';
-          } else if (r.status === 'UNKNOWN') {
-            badgeCls = 'badge-unknown';
-            badgeText = 'Chưa xác định';
-          }
-
-          tr.innerHTML = '<td>' + (startIdx + i + 1) + '</td>' +
-            '<td style="font-weight:600;font-family:monospace;color:#0b2343;">' + elEscape(r.employee_id) + '</td>' +
-            '<td style="font-weight:600;color:#1e293b;">' + elEscape(r.employee_name || 'Chưa cập nhật') + '</td>' +
-            '<td>' + elEscape(r.position) + '</td>' +
-            '<td>' + (r.join_date || '-') + '</td>' +
-            '<td>' + (r.last_work_date || '-') + '</td>' +
-            '<td><span class="flmp-roster-badge ' + badgeCls + '">' + badgeText + '</span></td>';
-          tb.append(tr);
-        });
-      }
-      table.append(tb);
-      rosterTableWrap.append(table);
-
-      // Pagination Controls
-      rosterPagination.replaceChildren();
-      var countInfo = el('span', 'Hiển thị ' + (filtered.length ? (startIdx + 1) : 0) + '–' + Math.min(startIdx + pageSize, filtered.length) + ' trên ' + filtered.length + ' nhân sự');
-      var btnGroup = el('div', null, 'flmp-page-btn-group');
-      var prevBtn = el('button', '← Trước', 'flmp-page-btn');
-      prevBtn.disabled = rosterPage <= 1;
-      prevBtn.onclick = function () {
-        if (rosterPage > 1) {
-          rosterPage--;
-          renderRosterList();
-        }
-      };
-
-      var pageLabel = el('span', ' ' + rosterPage + ' / ' + totalPages + ' ', null);
-      pageLabel.style.margin = '0 8px';
-
-      var nextBtn = el('button', 'Sau →', 'flmp-page-btn');
-      nextBtn.disabled = rosterPage >= totalPages;
-      nextBtn.onclick = function () {
-        if (rosterPage < totalPages) {
-          rosterPage++;
-          renderRosterList();
-        }
-      };
-
-      btnGroup.append(prevBtn, pageLabel, nextBtn);
-      rosterPagination.append(countInfo, btnGroup);
-    }
-
-    function fetchHubRoster() {
-      if (rosterLoaded) return;
-      rosterTableWrap.replaceChildren();
-      var loadDiv = el('div', null, 'flmp-loading');
-      loadDiv.innerHTML = '<div class="flmp-spinner"></div><p>Đang tải danh sách nhân sự tại ' + elEscape(hubRow.station) + '…</p>';
-      rosterTableWrap.append(loadDiv);
-
-      google.script.run
-        .withSuccessHandler(function (res) {
-          rosterLoaded = true;
-          rosterRows = (res && res.rows) || [];
-          renderRosterList();
-        })
-        .withFailureHandler(function (err) {
-          rosterTableWrap.replaceChildren();
-          var errDiv = el('div', null, 'flmp-warning');
-          errDiv.textContent = 'Không tải được danh sách nhân sự: ' + String(err.message || err);
-          rosterTableWrap.append(errDiv);
-        })
-        .flmPeopleGetHubRoster({
-          module: p.module,
-          station: hubRow.station,
-          anchorDate: p.anchor,
-          scopeType: p.scope ? p.scope.type : 'CITY',
-          scopeValue: p.scope ? p.scope.value : 'HCM_CITY'
-        });
-    }
-
+    var rosterInitiated = false;
     tabOverview.onclick = function () {
       tabOverview.classList.add('is-active');
       tabRoster.classList.remove('is-active');
@@ -594,7 +992,10 @@ window.FLM_PeopleModule = (function () {
       tabOverview.classList.remove('is-active');
       viewOverview.style.display = 'none';
       viewRoster.style.display = 'block';
-      fetchHubRoster();
+      if (!rosterInitiated) {
+        rosterInitiated = true;
+        createRosterView(viewRoster, hubRow, p, null);
+      }
     };
 
     var foot = el('div', null, 'flmp-modal-foot');
@@ -622,7 +1023,225 @@ window.FLM_PeopleModule = (function () {
     if (old) old.remove();
   }
 
-  function render(root, p) {
+  function details(root, p, request) {
+    var epoch = versions.get(root), serial = 0, cursor = null;
+    var section = el('section', null, 'flmp-details-section');
+    var isFte = p.module === 'FTE';
+    var title = el('h3', 'Danh sách nhân sự ' + (isFte ? 'Staff (FTE)' : 'Rider'), 'flmp-details-title');
+    var subtitle = el('p', 'Đọc hồ sơ nhân sự từ Google Sheets backend, tab ' + (isFte ? 'staff' : 'riders') + ' theo phân quyền.', 'flmp-muted');
+    var controls = el('div', null, 'flmp-details-controls');
+    var select = el('select', null, 'flmp-details-select');
+    var open = el('button', 'Xem danh sách', 'flmp-btn flmp-btn-primary');
+    var more = el('button', 'Xem trang tiếp', 'flmp-btn flmp-btn-secondary');
+    var result = el('div', null, 'flmp-details-result');
+
+    [
+      ['ACTIVE', 'Đang làm việc'],
+      ['EXITED', 'Đã nghỉ việc'],
+      ['NOT_JOINED', 'Chưa nhận việc'],
+      ['UNKNOWN', 'Chưa xác định'],
+      ['ALL', 'Tất cả trong phạm vi']
+    ].forEach(function (o) {
+      var option = el('option', o[1]);
+      option.value = o[0];
+      select.append(option);
+    });
+
+    select.setAttribute('aria-label', 'Trạng thái nhân viên');
+    open.type = more.type = 'button';
+    more.hidden = true;
+    controls.append(select, open, more);
+    section.append(title, subtitle, controls, result);
+    root.append(section);
+
+    function fetchPage(next) {
+      var id = ++serial;
+      if (!next) cursor = null;
+      open.disabled = more.disabled = true;
+      result.replaceChildren(el('p', 'Đang tải danh sách nhân sự…', 'flmp-muted'));
+      var timer = setTimeout(function () {
+        if (serial === id && versions.get(root) === epoch && root.isConnected) {
+          serial++;
+          open.disabled = more.disabled = false;
+          result.replaceChildren(el('p', 'Danh sách chưa tải xong. Bấm "Xem danh sách" để thử lại.', 'flmp-warning'));
+        }
+      }, 40000);
+
+      google.script.run
+        .withSuccessHandler(function (data) {
+          clearTimeout(timer);
+          if (serial !== id || versions.get(root) !== epoch || !root.isConnected) return;
+          open.disabled = more.disabled = false;
+          result.replaceChildren();
+
+          if (data.revision !== p.revision) {
+            cursor = null;
+            more.hidden = true;
+            result.append(el('p', 'Nguồn dữ liệu đã cập nhật phiên bản mới. Vui lòng tải lại module trước khi xem tiếp.', 'flmp-warning'));
+            return;
+          }
+
+          cursor = data.nextCursor;
+          more.hidden = !cursor;
+
+          if (!data.rows || !data.rows.length) {
+            result.append(el('p', 'Không có nhân viên nào khớp trạng thái và phạm vi đã chọn.', 'flmp-empty'));
+            return;
+          }
+
+          var wrap = el('div', null, 'flmp-scroll');
+          var table = el('table', null, 'flmp-roster-table flmp-details-table');
+          var head = el('thead');
+          var hr = el('tr');
+          ['STT', 'Mã nhân viên', 'Họ và tên', 'Hub', 'Trạng thái', 'Ngày nhận việc', 'Ngày làm cuối'].forEach(function (x, i) {
+            var th = el('th', x);
+            if (i === 0) th.style.width = '45px';
+            hr.append(th);
+          });
+          head.append(hr);
+          table.append(head);
+
+          var body = el('tbody');
+          var labels = { ACTIVE: 'Đang làm việc', EXITED: 'Đã nghỉ việc', NOT_JOINED: 'Chưa nhận việc', UNKNOWN: 'Chưa xác định' };
+          data.rows.forEach(function (r, i) {
+            var tr = el('tr');
+            var tdStt = el('td', String(i + 1));
+            var tdId = el('td', r.employee_id);
+            tdId.style.fontFamily = 'monospace';
+            tdId.style.fontWeight = '600';
+            tdId.style.color = '#0b2343';
+
+            var tdName = el('td', r.employee_name || '(Thiếu tên ở nguồn)');
+            tdName.style.fontWeight = '600';
+            tdName.style.color = '#0f172a';
+
+            var tdStation = el('td', r.station);
+            var tdState = el('td', labels[r.employment_state] || r.employment_state);
+            var tdJoin = el('td', r.join_date || '—');
+            var tdLast = el('td', r.last_work_date || '—');
+
+            [tdStt, tdId, tdName, tdStation, tdState, tdJoin, tdLast].forEach(function (td) {
+              td.style.textAlign = 'left';
+              tr.append(td);
+            });
+            body.append(tr);
+          });
+          table.append(body);
+          wrap.append(table);
+          result.append(wrap);
+        })
+        .withFailureHandler(function (e) {
+          clearTimeout(timer);
+          if (serial !== id || versions.get(root) !== epoch || !root.isConnected) return;
+          cursor = null;
+          more.hidden = true;
+          open.disabled = more.disabled = false;
+          result.replaceChildren(el('p', 'Không tải được danh sách: ' + String(e.message || e), 'flmp-warning'));
+        })
+        .flmPeopleGetEmployees(Object.assign({}, request, {
+          module: p.module,
+          state: select.value,
+          pageSize: 50,
+          cursor: next ? cursor : null
+        }));
+    }
+
+    open.addEventListener('click', function () { fetchPage(false); });
+    more.addEventListener('click', function () { fetchPage(true); });
+    select.addEventListener('change', function () { fetchPage(false); });
+  }
+
+  function renderBpo(root, p, request) {
+    var epoch=(versions.get(root)||0)+1;
+    versions.set(root,epoch);
+    root.replaceChildren();
+    root.classList.add('flmp');
+    var head=el('div',null,'flmp-head');
+    head.append(el('h2','Outsource (BPO)','flmp-title'),el('p','Ngày chốt '+p.anchor+' · Nguồn: bpo · Cache ngày '+p.cacheDay,'flmp-subtitle'));
+    root.append(head);
+    var cards=el('div',null,'flmp-cards');
+    [['records','CTV trong nguồn'],['worked_on_anchor','Làm gần nhất vào ngày chốt'],['flagged_records','Có ghi chú / cần kiểm tra']].forEach(function(def){
+      var card=el('div',null,'flmp-card');
+      card.append(el('span',def[1],'flmp-card-label'),el('strong',formatNum(p.totals[def[0]]),'flmp-card-value'));
+      cards.append(card);
+    });
+    root.append(cards);
+    var notes=el('details',null,'flmp-notice-accordion');
+    notes.append(el('summary','Nguồn dữ liệu và quy tắc phát sinh công','flmp-notice-summary'));
+    var noteBody=el('div',null,'flmp-notice-body');
+    (p.warnings||[]).forEach(function(note){noteBody.append(el('p',note));});
+    notes.append(noteBody);root.append(notes);
+    if(p.canViewEmployeeDetails!==true){
+      root.append(el('p','Tài khoản chỉ được xem số liệu tổng hợp, chưa có quyền xem hồ sơ CTV.','flmp-warning'));
+      return;
+    }
+    var section=el('section',null,'flmp-details-section');
+    section.append(el('h3','Danh sách CTV Outsource','flmp-details-title'));
+    var controls=el('div',null,'flmp-details-controls');
+    var search=el('input',null,'flmp-details-select');
+    search.type='search';search.maxLength=100;search.placeholder='Mã CTV, họ tên, Vendor, Hub…';search.setAttribute('aria-label','Tìm CTV Outsource');
+    var status=el('select',null,'flmp-details-select');
+    status.setAttribute('aria-label','Lọc ngày phát sinh công');
+    [['ALL','Tất cả CTV'],['WORKED_ON_ANCHOR','Làm gần nhất vào ngày chốt'],['NO_WORK_ON_ANCHOR','Ngày làm gần nhất trước ngày chốt'],['AFTER_ANCHOR','Ngày làm gần nhất sau ngày chốt'],['UNKNOWN','Dữ liệu chưa xác định']].forEach(function(def){
+      var option=el('option',def[1]);option.value=def[0];status.append(option);
+    });
+    var find=el('button','Tìm kiếm','flmp-btn flmp-btn-secondary');find.type='button';
+    controls.append(search,status,find);section.append(controls);
+    var result=el('div',null,'flmp-roster-table-wrap');section.append(result);
+    var pagination=el('div',null,'flmp-pagination');
+    var prev=el('button','Trang trước','flmp-btn flmp-btn-secondary');prev.type='button';
+    var label=el('span','Trang 1');
+    var next=el('button','Trang tiếp','flmp-btn flmp-btn-secondary');next.type='button';
+    pagination.append(prev,label,next);section.append(pagination);root.append(section);
+    var cursors=[null],page=0,serial=0,query='';
+    function fetchPage(index){
+      var id=++serial;
+      prev.disabled=next.disabled=find.disabled=true;
+      result.replaceChildren(el('p','Đang tải danh sách CTV…','flmp-muted'));
+      var timer=setTimeout(function(){
+        if(id!==serial||versions.get(root)!==epoch||!root.isConnected)return;
+        serial++;
+        result.replaceChildren(el('p','Truy vấn chưa hoàn tất. Bấm Tìm kiếm để thử lại.','flmp-warning'));
+        find.disabled=false;
+      },40000);
+      google.script.run.withSuccessHandler(function(res){
+        clearTimeout(timer);
+        if(id!==serial||versions.get(root)!==epoch||!root.isConnected)return;
+        page=index;cursors[index+1]=res.nextCursor;
+        var table=el('table',null,'flmp-roster-table');
+        var tr=el('tr'),thead=el('thead'),tbody=el('tbody');
+        ['Mã CTV','Họ và tên','Vendor','Loại CTV','Hub','Ngày làm gần nhất','Số ngày chưa phát sinh công (nguồn)','Ghi chú'].forEach(function(title){tr.append(el('th',title));});
+        thead.append(tr);
+        (res.rows||[]).forEach(function(row){
+          var line=el('tr');
+          [row.employee_id,row.employee_name,row.vendor,row.contract_type,row.station,row.last_activity_date,row.inactive_days,row.tag||row.issues].forEach(function(value,index){
+            var cell=el('td',value==null||value===''?'—':String(value));
+            if(index===6)cell.style.cssText='text-align:right;font-variant-numeric:tabular-nums;';
+            line.append(cell);
+          });
+          tbody.append(line);
+        });
+        if(!(res.rows||[]).length){var empty=el('td','Không có CTV khớp bộ lọc.');empty.colSpan=8;var line=el('tr');line.append(empty);tbody.append(line);}
+        table.append(thead,tbody);result.replaceChildren(table);
+        label.textContent='Trang '+(page+1)+' · '+(res.rows||[]).length+' CTV';
+        prev.disabled=page===0;next.disabled=!res.nextCursor;find.disabled=false;
+      }).withFailureHandler(function(error){
+        clearTimeout(timer);
+        if(id!==serial||versions.get(root)!==epoch||!root.isConnected)return;
+        result.replaceChildren(el('p','Không tải được danh sách: '+String(error.message||error),'flmp-warning'));
+        prev.disabled=next.disabled=true;find.disabled=false;
+      }).flmPeopleGetEmployees(Object.assign({},request||{},{module:'BPO',scopeType:p.scope&&p.scope.type,scopeValue:p.scope&&p.scope.value,anchorDate:p.anchor,state:status.value,search:query,pageSize:50,cursor:cursors[index]}));
+    }
+    function reset(){cursors=[null];query=search.value.trim();fetchPage(0);}
+    find.onclick=reset;status.onchange=reset;
+    search.onkeydown=function(event){if(event.key==='Enter'){event.preventDefault();reset();}};
+    prev.onclick=function(){if(page>0)fetchPage(page-1);};
+    next.onclick=function(){if(cursors[page+1])fetchPage(page+1);};
+    fetchPage(0);
+  }
+
+  function render(root, p, request) {
+    if(p.module==='BPO'){renderBpo(root,p,request);return;}
     root.replaceChildren();
     root.classList.add('flmp');
 
@@ -699,7 +1318,7 @@ window.FLM_PeopleModule = (function () {
     var netPillCls = netFlow > 0 ? 'is-pos' : (netFlow < 0 ? 'is-neg' : 'is-neu');
     var netSign = netFlow > 0 ? '+' : '';
     flowBar.innerHTML = '<div class="flmp-flow-item"><span>Biến động nhân sự ròng (30 ngày):</span>' +
-      '<span class="flmp-flow-pill ' + netPillCls + '">' + netSign + formatNum(netFlow) + ' ' + (isRider ? 'Rider' : 'Staff') + '</span></div>' +
+      '<span class="flmp-flow-pill ' + netPillCls + '">' + netSign + formatNum(netFlow) + ' ' + (isRider ? 'Rider' : 'Nhân sự') + '</span></div>' +
       '<div class="flmp-flow-item"><span>Tỷ lệ biến động (Turnover rate):</span>' +
       '<span class="flmp-flow-pill is-neu">' + (activeTotal > 0 ? ((lastWorkTotal / activeTotal) * 100).toFixed(1) : 0) + '%</span></div>' +
       '<div class="flmp-flow-item" style="color:#64748b;font-size:12px;">' +
@@ -708,19 +1327,19 @@ window.FLM_PeopleModule = (function () {
 
     // Collapsible Warnings / Source Note
     if (p.warnings && p.warnings.length) {
-      var details = el('details', null, 'flmp-notice-accordion');
+      var noticeAccordion = el('details', null, 'flmp-notice-accordion');
       var summary = el('summary', null, 'flmp-notice-summary');
       summary.innerHTML = '<span><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="vertical-align:-2px;margin-right:6px;"><path d="m21.73 18-8-14a2 2 0 0 0-3.48 0l-8 14A2 2 0 0 0 4 21h16a2 2 0 0 0 1.73-3Z"/><line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg>' +
         'Ghi chú nguồn dữ liệu & lưu ý quy tắc (' + p.warnings.length + ')</span><small>Bấm để xem</small>';
-      details.append(summary);
+      noticeAccordion.append(summary);
       var bodyNotices = el('div', null, 'flmp-notice-body');
       var ul = el('ul');
       p.warnings.forEach(function (w) {
         ul.append(el('li', w));
       });
       bodyNotices.append(ul);
-      details.append(bodyNotices);
-      root.append(details);
+      noticeAccordion.append(bodyNotices);
+      root.append(noticeAccordion);
     }
 
     var rows = p.hubRows || [];
@@ -849,6 +1468,21 @@ window.FLM_PeopleModule = (function () {
     root.append(analytics);
     renderAnalyticsBars();
 
+    // If a single Hub is selected, render the authentic Hub Roster Table directly on the page!
+    if (rows.length === 1) {
+      var singleHubBox = el('div', null, 'flmp-single-hub-section');
+      var singleCodeDisplay = rows[0].hubCode || rows[0].stationCode ? ' <span style="font-size:14px;color:#64748b;font-weight:normal;">(' + elEscape(rows[0].hubCode || rows[0].stationCode) + ')</span>' : '';
+      singleHubBox.innerHTML = '<div class="flmp-table-head" style="margin:24px 0 14px 0;padding-bottom:10px;border-bottom:1px solid #e2e8f0;">' +
+        '<h3 class="flmp-table-title" style="font-size:16px;font-weight:700;color:#0b2343;margin:0 0 4px 0;">' +
+        (isRider ? '👥 Bảng hiển thị danh sách Rider tại Hub ' : '👥 Bảng hiển thị danh sách Staff (FTE) tại Hub ') + elEscape(rows[0].station) + singleCodeDisplay + '</h3>' +
+        '<p style="color:#64748b;font-size:12px;margin:0;">' +
+        (isRider ? 'Hồ sơ Rider, ngày nhận việc và ngày làm cuối từ tab riders trong backend' : 'Nhân sự thuộc Hub từ tab staff, đã loại các vị trí Rider, gồm vị trí và ngày nhận/nghỉ việc') +
+        '</p></div>';
+      root.append(singleHubBox);
+      createRosterView(singleHubBox, rows[0], p, (p.roster && p.roster.rows) || null);
+      return;
+    }
+
     // Toolbar (Search + Hub count)
     var toolbar = el('div', null, 'flmp-toolbar');
     var searchBox = el('div', null, 'flmp-search-box');
@@ -860,7 +1494,13 @@ window.FLM_PeopleModule = (function () {
     searchBox.append(searchInput);
 
     var countBadge = el('span', 'Hiển thị ' + rows.length + ' Hubs (Bấm dòng để xem chi tiết)', 'flmp-count-badge');
-    toolbar.append(searchBox, countBadge);
+    var exportSummaryBtn = el('button', null, 'flmp-roster-export app-btn-export');
+    exportSummaryBtn.id = 'flmpExportHubSummary';
+    exportSummaryBtn.innerHTML = '<svg class="app-btn-icon" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg> Xuất dữ liệu Hubs (CSV)';
+    exportSummaryBtn.onclick = function () {
+      exportHubSummaryCsv(rows, isRider, p.anchor);
+    };
+    toolbar.append(searchBox, countBadge, exportSummaryBtn);
     root.append(toolbar);
 
     // Table container
@@ -984,6 +1624,10 @@ window.FLM_PeopleModule = (function () {
     };
 
     updateTable();
+
+    if (p.canViewEmployeeDetails === true) {
+      details(root, p, request);
+    }
   }
 
   function load(root, module, request, onDone, onError) {
@@ -996,7 +1640,7 @@ window.FLM_PeopleModule = (function () {
     var loadingBox = el('div', null, 'flmp-loading');
     loadingBox.append(
       el('div', null, 'flmp-spinner'),
-      el('p', 'Đang tải dữ liệu phân tích nhân sự ' + (module === 'RIDER' ? 'Rider' : 'FTE') + '…')
+      el('p', 'Đang tải dữ liệu phân tích nhân sự ' + (module === 'RIDER' ? 'Rider' : module === 'BPO' ? 'Outsource (BPO)' : 'FTE') + '…')
     );
     root.append(loadingBox);
 
@@ -1011,7 +1655,7 @@ window.FLM_PeopleModule = (function () {
       .withSuccessHandler(function (p) {
         clearTimeout(timer);
         if (versions.get(root) !== seq || !root.isConnected) return;
-        render(root, p);
+        render(root, p, request);
         if (typeof onDone === 'function') onDone(p);
       })
       .withFailureHandler(function (e) {

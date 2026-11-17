@@ -5,6 +5,9 @@ const { root, sources, read } = require('./source.cjs');
 require('./check.cjs');
 const out = path.join(root, 'dist', 'apps-script');
 fs.mkdirSync(out, { recursive: true });
+// Remove the retired embedded FM snapshot from older local export bundles.
+const archivedFmSnapshot = path.join(out, 'FMBacklogTracker.html');
+if (fs.existsSync(archivedFmSnapshot)) fs.unlinkSync(archivedFmSnapshot);
 const manifest = {};
 for (const name of sources()) {
   // Apps Script doGet requests Index, while the supplied source is named index.

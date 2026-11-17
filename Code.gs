@@ -4421,8 +4421,14 @@ function findForecastSheet_(ss) {
   const exact = ss.getSheetByName(FORECAST_CFG.SHEET_NAME);
   if (exact) return exact;
 
-  return ss.getSheets().find(function(sh) {
+  const aliasMatch = ss.getSheets().find(function(sh) {
     return aliases.indexOf(normalizeCompare_(sh.getName())) !== -1;
+  });
+  if (aliasMatch) return aliasMatch;
+
+  // Fallback to FC sheets (e.g. FC T10/26, FC T11/26, FC)
+  return ss.getSheets().find(function(sh) {
+    return /^FC(?:$|[\s_\-\/])/i.test(sh.getName().trim());
   }) || null;
 }
 
@@ -4551,6 +4557,9 @@ function buildForecastModel_() {
   const headerInfo = findForecastHeader_(dispAll);
 
   if (!headerInfo) {
+    if (dispAll.length >= 2 && dispAll[1].some(function(h){ return /(?:fm|lm)\s*forecast/i.test(String(h||'')); })) {
+      return buildForecastModelFromWideFc_(ss, sheet, dispAll);
+    }
     throw new Error(
       'FORECAST_HEADER_NOT_FOUND: Sheet "' + sheet.getName() +
       '" thiếu một hoặc nhiều header Historical Forecast bắt buộc.'
@@ -4618,6 +4627,97 @@ function buildForecastModel_() {
     fieldMap: headerInfo.fieldMap || {},
     dates: Object.keys(dateSet).map(factDateKey_).filter(Boolean).sort(factSortDateDesc_),
     sourceRows: Math.max(0, lastRow - headerInfo.rowIndex - 1),
+    parsedRows: rows.length,
+    matchedRows: rows.filter(function(x){ return !!x.hubCode; }).length,
+    unmatchedRows: rows.filter(function(x){ return !x.hubCode; }).length,
+    rows: rows
+  };
+}
+
+function buildForecastModelFromWideFc_(ss, sheet, dispAll) {
+  const permission = getPermissionModel_(false);
+  const allHubCodes = (permission.stations || []).map(function(st){ return st.hubCode; });
+  const stationMatcher = buildForecastStationMatcher_(permission.stations || [], allHubCodes);
+  const rows = [];
+  const dateSet = {};
+
+  const allFcSheets = typeof dtcFindFcSheets_ === 'function' ? dtcFindFcSheets_(ss) : [sheet];
+  let mergedValues = dispAll;
+  if (allFcSheets.length > 1 && typeof dtcMergeFcSheets_ === 'function') {
+    const sheetsData = allFcSheets.map(function(sh){
+      return sh.getDataRange().getDisplayValues();
+    });
+    mergedValues = dtcMergeFcSheets_(sheetsData);
+  }
+
+  const row0 = mergedValues[0] || [], row1 = mergedValues[1] || [];
+  const dateCols = [];
+  let currentDate = '';
+  for (let c = 1; c < row0.length; c++) {
+    const d = forecastDateKey_(null, row0[c]);
+    if (d) currentDate = d;
+    if (!currentDate) continue;
+    const tag = String(row1[c] || '').replace(/[\s#_]/g, '').toLowerCase();
+    const isLm = tag === 'lmforecast' || tag === 'forecastlm';
+    const isFm = tag === 'fmforecast' || tag === 'forecastfm';
+    if (isLm || isFm) {
+      dateCols.push({ index: c, date: currentDate, isLm: isLm });
+    }
+  }
+
+  const byDate = {};
+  dateCols.forEach(function(col) {
+    if (!byDate[col.date]) byDate[col.date] = {};
+    if (col.isLm) byDate[col.date].lm = col.index;
+    else byDate[col.date].fm = col.index;
+  });
+
+  const uniqueDates = Object.keys(byDate).sort();
+  for (let r = 2; r < mergedValues.length; r++) {
+    const sourceHubName = String(mergedValues[r][0] || '').trim();
+    if (!sourceHubName) continue;
+    const matchedStation = stationMatcher.resolve(sourceHubName);
+
+    uniqueDates.forEach(function(d) {
+      dateSet[d] = true;
+      const fmCol = byDate[d].fm, lmCol = byDate[d].lm;
+      const fmVal = fmCol !== undefined ? forecastNumber_(mergedValues[r][fmCol], mergedValues[r][fmCol]) : 0;
+      const lmVal = lmCol !== undefined ? forecastNumber_(mergedValues[r][lmCol], mergedValues[r][lmCol]) : 0;
+
+      rows.push({
+        rowNumber: r + 1,
+        dateKey: d,
+        region: matchedStation ? (matchedStation.region || '') : '',
+        province: matchedStation ? (matchedStation.province || '') : '',
+        sourceHubName: sourceHubName,
+        hubCode: matchedStation ? matchedStation.hubCode : '',
+        hubName: matchedStation ? matchedStation.hubName : sourceHubName,
+        zone: matchedStation ? (matchedStation.zone || '') : '',
+        district: matchedStation ? (matchedStation.district || '') : '',
+
+        fmForecast: fmVal,
+        fmInbound: 0,
+        fmDifferenceSource: null,
+        pickupDone: 0,
+
+        lmForecast: lmVal,
+        lmInbound: 0,
+        lmDifferenceSource: null,
+        lmLhArrived: 0,
+        lmSocTransported: 0
+      });
+    });
+  }
+
+  return {
+    sheetFound: true,
+    sheetName: sheet.getName(),
+    generatedAt: new Date().toISOString(),
+    headerRow: 2,
+    headers: row1,
+    fieldMap: {},
+    dates: Object.keys(dateSet).map(factDateKey_).filter(Boolean).sort(factSortDateDesc_),
+    sourceRows: Math.max(0, mergedValues.length - 2),
     parsedRows: rows.length,
     matchedRows: rows.filter(function(x){ return !!x.hubCode; }).length,
     unmatchedRows: rows.filter(function(x){ return !x.hubCode; }).length,
@@ -11074,6 +11174,14 @@ function installPerformanceTriggers() {
       .inTimezone(FACT_ENGINE_CFG.FULL_REFRESH_TIMEZONE)
       .create();
   });
+
+  try {
+    if (typeof installSeaTalkAlertTrigger === 'function') {
+      installSeaTalkAlertTrigger();
+    }
+  } catch (eST) {
+    Logger.log('installPerformanceTriggers installSeaTalkAlertTrigger warning: ' + eST);
+  }
 
   // Build current master caches immediately after install.
   const initial = runScheduledPerformanceRefresh();

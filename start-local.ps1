@@ -1,6 +1,10 @@
 $node = Get-Command node -ErrorAction SilentlyContinue
 if ($node) { $nodePath = $node.Source } else {
   $nodePath = Join-Path $env:USERPROFILE '.cache\codex-runtimes\codex-primary-runtime\dependencies\node\bin\node.exe'
+  if (-not (Test-Path -LiteralPath $nodePath)) {
+    $fallback = Get-ChildItem -Path "$env:LOCALAPPDATA\OpenAI\Codex\runtimes\cua_node" -Filter "node.exe" -Recurse -ErrorAction SilentlyContinue | Select-Object -First 1 -ExpandProperty FullName
+    if ($fallback) { $nodePath = $fallback }
+  }
 }
 if (-not (Test-Path -LiteralPath $nodePath)) { throw 'Install Node.js 18+ to run this project.' }
 Push-Location $PSScriptRoot

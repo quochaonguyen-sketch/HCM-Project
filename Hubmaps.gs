@@ -33,7 +33,15 @@ function getHubMap() {
 function hubMapDtcKey_(v){return String(v==null?'':v).trim().toLowerCase().replace(/\s+/g,' ').replace(/(?:\s+hub)+$/,'')}
 function hubMapDtcDate_(v){
  if(v instanceof Date&&!isNaN(v.getTime()))return Utilities.formatDate(v,'Asia/Ho_Chi_Minh','yyyy-MM-dd');
- const s=String(v==null?'':v).trim();return /^\d{4}-\d{2}-\d{2}$/.test(s)&&!isNaN(Date.parse(s))?s:'';
+ if(typeof v==='number'&&v>30000&&v<60000){
+  const dt=new Date(Math.round((v-25569)*86400*1000));
+  return Utilities.formatDate(dt,'Asia/Ho_Chi_Minh','yyyy-MM-dd');
+ }
+ const s=String(v==null?'':v).trim();
+ if(/^\d{4}-\d{2}-\d{2}$/.test(s)&&!isNaN(Date.parse(s)))return s;
+ const m=/^(\d{1,2})[\/\-](\d{1,2})[\/\-](\d{4})/.exec(s);
+ if(m)return m[3]+'-'+m[2].padStart(2,'0')+'-'+m[1].padStart(2,'0');
+ return '';
 }
 function hubMapDtcNumber_(v){
  if(v==null||String(v).trim()==='')return null;
@@ -64,7 +72,7 @@ function hubMapDtcSource_(book){
   const item=selected[name],row=item.row,status=item.conflict?'DUPLICATE_CONFLICT':String(cell(row,'status')).trim().toUpperCase(),
    backlog=hubMapDtcNumber_(cell(row,'backlog_eod')),avg=hubMapDtcNumber_(cell(row,'delivered_14d_avg')),value=hubMapDtcNumber_(cell(row,'dtc_days')),
    validDays=hubMapDtcNumber_(cell(row,'valid_days')),expectedDays=hubMapDtcNumber_(cell(row,'expected_days')),
-   valid=status==='OK'&&backlog!==null&&avg>0&&value!==null&&validDays===14&&expectedDays===14,
+   valid=(status==='OK'||status==='VALID')&&backlog!==null&&avg>0&&value!==null&&(validDays==null||expectedDays==null||validDays===expectedDays||validDays>=7),
    band=String(cell(row,'dtc_band')).trim().toLowerCase();
   result.byName[name]={dtc:valid?value:null,backlogEod:backlog,avgDelivered14:avg,
    dtcColor:valid?(['green','yellow','red'].indexOf(band)!==-1?band:value<=0.5?'green':value<=1?'yellow':'red'):'unknown',

@@ -40,19 +40,20 @@ assert.equal(fteRoster.module, 'FTE');
 assert.equal(fteRoster.station, testStation);
 assert(fteRoster.rows.length > 0);
 assert(fteRoster.rows[0].employee_id);
-assert.equal(fteRoster.rows[0].position, '3. Staff');
+assert(fteRoster.rows[0].position, 'Preserve the source position from staff');
+assert(fteRoster.rows.every(row => !/\brider\b/i.test(row.position)), 'FTE roster excludes Rider positions');
 assert(['ACTIVE', 'EXITED', 'UNKNOWN', 'NOT_JOINED'].includes(fteRoster.rows[0].status));
 console.log('PASS: FTE Hub raw roster loaded:', fteRoster.rows.length, 'records for', testStation);
 
 const riderRoster = r.call('flmPeopleGetHubRoster', [{
   module: 'RIDER',
-  station: testStation,
+  station: rider.hubRows[0].station,
   scopeType: 'CITY',
   scopeValue: 'HCM_CITY'
 }]);
 assert.equal(riderRoster.module, 'RIDER');
 assert(riderRoster.rows.length > 0);
-assert.equal(riderRoster.rows[0].position, '4. Rider');
+assert(/^4\. Rider/.test(riderRoster.rows[0].position));
 console.log('PASS: Rider Hub raw roster loaded:', riderRoster.rows.length, 'records for', testStation);
 
 // 4. Validation: Invalid module
@@ -70,4 +71,25 @@ assert.throws(() => {
   r.call('flmPeopleGetHubRoster', [{ module: 'RIDER', station: '', scopeType: 'CITY', scopeValue: 'HCM_CITY' }]);
 }, /PEOPLE_STATION_REQUIRED/);
 
+// 7. Keyset Employee Listing (flmp-2-names)
+const empList = r.call('flmPeopleGetEmployees', [{ module: 'FTE', state: 'ACTIVE', pageSize: 10, scopeType: 'CITY', scopeValue: 'HCM_CITY' }]);
+assert.equal(empList.module, 'FTE');
+assert.equal(empList.state, 'ACTIVE');
+assert(Array.isArray(empList.rows));
+assert(empList.rows.length > 0);
+assert(empList.rows[0].employee_id);
+assert(empList.rows[0].employee_name);
+assert(empList.rows.every(row => !/\brider\b/i.test(row.position)), 'FTE employee pages exclude Rider positions');
+assert.equal(empList.rows[0].employment_state, 'ACTIVE');
+console.log('PASS: flmPeopleGetEmployees returned', empList.rows.length, 'staff rows with source names');
+
+const bpo = r.call('flmPeopleGetResource', [{module:'BPO',scopeType:'CITY',scopeValue:'HCM_CITY'}]);
+assert.equal(bpo.sourceSheet,'bpo');assert(bpo.totals.records>0);
+let bpoPage = r.call('flmPeopleGetEmployees', [{module:'BPO',state:'ALL',pageSize:100,scopeType:'CITY',scopeValue:'HCM_CITY'}]);
+const bpoRows=[...bpoPage.rows];
+while(bpoPage.nextCursor){bpoPage=r.call('flmPeopleGetEmployees',[{module:'BPO',state:'ALL',pageSize:100,cursor:bpoPage.nextCursor,scopeType:'CITY',scopeValue:'HCM_CITY'}]);bpoRows.push(...bpoPage.rows);}
+assert.equal(bpoRows.length,bpo.totals.records);
+assert.equal(new Set(bpoRows.map(row=>row.employee_id)).size,bpoRows.length);
+assert(bpoRows.every(row=>row.last_work_date===undefined&&row.join_date===undefined));
+console.log('PASS: Outsource separate source, scoped unique CTV and activity fields:',bpo.totals);
 console.log('ALL PEOPLE API & ROSTER TESTS PASSED.');

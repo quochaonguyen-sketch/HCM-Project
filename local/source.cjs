@@ -7,7 +7,8 @@ function sources() {
   if (fs.existsSync(duplicate) && fs.readFileSync(duplicate, 'utf8') !== fs.readFileSync(path.join(root, 'DailyKPIDirect.gs'), 'utf8')) {
     throw Error('Deoloyments.gs has diverged. Reconcile it with DailyKPIDirect.gs before continuing.');
   }
-  return fs.readdirSync(root).filter(n => /\.(gs|html)$/.test(n) && n !== 'Deoloyments.gs').sort();
+  // The former embedded FM snapshot is an archive, never shipped or served.
+  return fs.readdirSync(root).filter(n => /\.(gs|html)$/.test(n) && n !== 'Deoloyments.gs' && n !== 'FMBacklogTracker.html').sort();
 }
 function read(name) { return fs.readFileSync(path.join(root, name), 'utf8'); }
 module.exports = { root, sources, read };

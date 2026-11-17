@@ -1,0 +1,44 @@
+--- baseline/PeopleIngest.gs
++++ patched/PeopleIngest.gs
+@@ -8,6 +8,8 @@
+   try {var p=PropertiesService.getScriptProperties(),result=[];FLMPI_CFG.sources.forEach(function(s){try{result.push(FLMPI_tick_(s,p));}catch(e){var err={module:s.module,state:'ERROR',message:String(e.message||e)};p.setProperty('FLMPI_STATUS_'+s.module,JSON.stringify(err));console.error(JSON.stringify(err));result.push(err);}});console.log(JSON.stringify(result));return result;}finally{lock.releaseLock();}
+ }
+ function FLMPI_tick_(s,p){
++  // Rider recovery and legacy worker must share this ingestion project/ScriptLock.
++  if(s.module==='RIDER'&&p.getProperty('FLMRR_PENDING'))return {module:'RIDER',state:'REPAIR_IN_PROGRESS'};
+   var key='FLMPI_PENDING_'+s.module,r=p.getProperty(key);if(r)return FLMPI_resume_(s,JSON.parse(r),p,key);
+   // Two calls per source (Sheets batch + source normalize); never read other tabs.
+   var ranges=[s.master,s.off].map(function(t){return "'"+t.replace(/'/g,"''")+"'!A:AE";});
+@@ -16,7 +18,10 @@
+   var rows=normalized.records,hash=FLMPI_hash_(JSON.stringify(rows.map(function(o){var x=Object.assign({},o);delete x.ingested_at;return x;})));
+   var status=function(v){v.module=s.module;v.checkedAt=new Date().toISOString();p.setProperty('FLMPI_STATUS_'+s.module,JSON.stringify(v));return v;};
+   if(p.getProperty('FLMPI_CANDIDATE_'+s.module)!==hash){p.setProperty('FLMPI_CANDIDATE_'+s.module,hash);return status({state:'WAITING_STABLE_SOURCE',audit:normalized.audit});}
+-  if(p.getProperty('FLMPI_HASH_'+s.module)===hash)return status({state:'UNCHANGED',audit:normalized.audit});
++  if(p.getProperty('FLMPI_HASH_'+s.module)===hash){
++    if(s.module!=='RIDER'||FLMPI_riderTarget_(s,rows.length))return status({state:'UNCHANGED',audit:normalized.audit});
++    // Same source hash is not proof that destination still exists. Missing Rider target must republish.
++  }
+   var previous=Number(p.getProperty('FLMPI_ROWS_'+s.module)||0);if(previous&&rows.length<previous*.9)throw Error('SOURCE_SHRINK_GT_10_PERCENT');
+   // Hold publication for conflicting master IDs or exit dates; do not silently drop people.
+   if(normalized.audit.duplicateMasterIds||normalized.audit.offboardingConflictingDates)throw Error('CONFLICTS_REQUIRE_SOURCE_CORRECTION: '+JSON.stringify(normalized.audit));
+@@ -36,6 +41,7 @@
+     BigQuery.Jobs.insert({jobReference:FLMPI_jobRef_(r.copyId),configuration:{copy:{sourceTable:FLMPI_ref_(r.stage),destinationTable:FLMPI_ref_(s.target),writeDisposition:'WRITE_TRUNCATE'}}},FLMPI_CFG.project);
+     return {module:s.module,state:'BQ_RUNNING',phase:'COPY',jobId:r.copyId};
+   }
++  if(s.module==='RIDER'&&!FLMPI_riderTarget_(s,r.rows))throw Error('RIDER_TARGET_NOT_VERIFIED_AFTER_COPY');
+   p.setProperty('FLMPI_HASH_'+s.module,r.hash);p.setProperty('FLMPI_ROWS_'+s.module,String(r.rows));p.deleteProperty(key);
+   var out={module:s.module,state:'SUCCESS',records:r.rows,dataAsOf:r.stamp,audit:r.audit};p.setProperty('FLMPI_STATUS_'+s.module,JSON.stringify(out));
+   // Intentionally retain stage until independently verified; manual cleanup in README.
+@@ -46,3 +52,12 @@
+ function FLMPI_hash_(s){return Utilities.computeDigest(Utilities.DigestAlgorithm.SHA_256,s,Utilities.Charset.UTF_8).map(function(b){return ('0'+((b+256)%256).toString(16)).slice(-2);}).join('');}
+ function FLMPI_ref_(t){return {projectId:FLMPI_CFG.project,datasetId:FLMPI_CFG.dataset,tableId:t};}
+ function FLMPI_jobRef_(id){return {projectId:FLMPI_CFG.project,location:FLMPI_CFG.location,jobId:id};}
++
++// Rider-only presence/schema/count guard; never changes FTE execution.
++function FLMPI_riderTarget_(s,expected){
++  var m;try{m=BigQuery.Tables.get(FLMPI_CFG.project,FLMPI_CFG.dataset,s.target);}catch(e){var code=Number(e&&(e.code||(e.details&&e.details.code)));if(code===404||/\bNot found: Table\b/i.test(String(e.message||e)))return false;throw e;}
++  var fields={};(m.schema&&m.schema.fields||[]).forEach(function(f){fields[f.name]=f;});
++  var need={module:'STRING',employee_id:'STRING',employee_name:'STRING',station:'STRING',join_date:'DATE',last_work_date:'DATE',quality:'STRING',ingested_at:'TIMESTAMP'};
++  if(m.type!=='TABLE'||Object.keys(need).some(function(k){return !fields[k]||fields[k].type!==need[k]||fields[k].mode==='REPEATED';}))throw Error('RIDER_TARGET_SCHEMA_INVALID');
++  if(String(m.numRows)!==String(expected))throw Error('RIDER_TARGET_COUNT_MISMATCH');return true;
++}

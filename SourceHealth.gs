@@ -2,6 +2,10 @@
  * not proof that an upstream job or trigger is running. */
 function getSourceHealth() {
   requireAdmin_();
+  return getSourceHealthInternal_();
+}
+
+function getSourceHealthInternal_() {
   const now=new Date(),books={},props=PropertiesService.getScriptProperties();
   const specs=[
     {name:'Permission',book:'app',kind:'config'},
@@ -11,7 +15,7 @@ function getSourceHealth() {
     ...['Rider Prod','sort prod 2'].map(name=>({name:name,book:'daily',kind:'daily',wide:true,dates:['Date']})),
     ...['FM Order Volume D0','LM Backlog D0','LM Order Volume D0','Delivery Progress D0','Roster D0','Roster Shifts D0','Backlog D0','FM Pending Pickup Backlog D0'].map(name=>({name:name,book:'d0',kind:'live',dates:['fetched_at']})),
     {name:'Backlog EOD',book:'d0',kind:'eod',dates:['snapshot_date']},
-    {name:'DTC',book:'d0',kind:'daily',dtc:true,dates:['window_end']}
+    {name:'DTC',fallback:'DTC D0',book:'d0',kind:'daily',dtc:true,dates:['window_end']}
   ];
   function book(key){
     if(!books[key]){
@@ -19,7 +23,7 @@ function getSourceHealth() {
         let id;
         if(key==='app')books[key]={db:getDb_()};
         else if(key==='daily')books[key]={db:kpiDailyDirectDatabase_()};
-        else {id=props.getProperty('D0_DB_SHEET_ID');if(!id)throw Error('Chưa cấu hình D0_DB_SHEET_ID.');books[key]={db:SpreadsheetApp.openById(id)}}
+        else {id=props.getProperty('D0_DB_SHEET_ID') || props.getProperty('APP_DB_SHEET_ID') || '1_tgFNXYfbNoz3OF8sqD9QIwazwvjT6Va_OpxmbdZFEQ';books[key]={db:SpreadsheetApp.openById(id)}}
       }catch(err){books[key]={error:String(err.message||err)}}
     }
     if(books[key].error)throw Error(books[key].error);

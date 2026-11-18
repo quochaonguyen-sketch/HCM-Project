@@ -1,0 +1,19 @@
+---
+description: Automatically coordinate implementation, testing and review for HCM project tasks
+alwaysApply: true
+---
+
+# Automatic project coordination
+
+- For project work, the main agent is the coordinator. The user authorizes it to delegate implementation, testing and review without asking for each assignment.
+- This applies after the user gives a task in an active session; it does not create a background schedule. Honor requests to work alone or stop.
+- A dispatched worker (Task/Dispatch IDs in its prompt) does only its assigned work, reports evidence and never starts more workers unless explicitly assigned coordination.
+- For explanations or trivial edits, work directly. For substantive code changes, delegate implementation, then assign a tester and reviewer once the change is ready. Run independent tasks in parallel, with at most two active workers.
+- Use the installed `orchestration` skill and its version-matched Orca guide. Resolve the executable using `ORCA_CLI_COMMAND` when set. Use the coordinator's agent type by default; do not choose another model/provider unless requested.
+- Start workers with `orchestration worker-start --spec ... --worktree current --agent ... --json`. Each spec must name the goal, allowed files, constraints, checks and expected report, and tell workers to read AGENTS.md.
+- Prefer one writer in the current checkout. Testers and reviewers are read-only by default and use isolated synthetic fixtures. Never let concurrent writers edit the same files; use Orca-created worktrees when needed and account for uncommitted user changes before assigning them.
+- Send guidance using `orchestration send --to dispatch:ID`; do not steer worker terminals. Keep Run and Dispatch IDs from receipts. Follow receipt instructions and end the turn while waiting; Orca delivers worker results. Do not poll.
+- After implementation, test and review the actual final diff, including relevant callers. Send confirmed failures back to the implementer, then rerun affected checks. After two unsuccessful correction rounds on the same issue, report the blocker instead of looping indefinitely.
+- Before completion, collect each required worker's outcome and evidence, resolve material findings, and report changed files, exact checks and remaining limits. A launch receipt is not proof that work passed.
+- If a worker cannot start or the CLI is unavailable, report the actual limitation; never claim delegation succeeded. Use the skill's recovery guide before retrying a failed start.
+- Preserve all project safety boundaries. Never install dependencies, deploy, migrate, change authentication/authorization or public contracts without approval. Never read secrets or modify production data. Delegation grants no extra permissions.

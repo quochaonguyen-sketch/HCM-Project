@@ -1,5 +1,9 @@
 # HCM - FLM Hub Ops Dashboard — local và Apps Script
 
+## Test không cần dữ liệu riêng tư
+
+Chạy `npm run test:local` với Node.js >=18. Bộ test dùng dữ liệu tổng hợp trong thư mục tạm riêng cho từng nhóm, tự dọn sau khi chạy và không đọc/ghi dữ liệu local đang có. Không cần cài dependency, workbook hay credentials. Xem [hướng dẫn môi trường test và local](docs/local-development.md) để biết phạm vi kiểm tra và các test cũ cần dữ liệu gốc.
+
 ## Chạy local
 
 Mở PowerShell trong thư mục dự án và chạy `./start-local.ps1`, sau đó mở http://127.0.0.1:3000.
@@ -27,7 +31,7 @@ Thay đổi quản trị local được lưu riêng trong `local/state.private.j
 ## Một nguồn mã cho hai môi trường
 
 1. Sửa các file `.gs` và `.html` tại thư mục gốc.
-2. `npm run check` kiểm tra cú pháp/khởi tạo; `npm run test:local` kiểm tra API, dữ liệu và phạm vi quyền với Excel + mock. Kiểm thử dịch vụ Google trên Apps Script test trước khi phát hành.
+2. `npm run check` kiểm tra cú pháp/khởi tạo với dữ liệu local; `npm run test:local` kiểm tra API và phạm vi quyền với dữ liệu tổng hợp cách ly. Kiểm thử dịch vụ Google trên Apps Script test trước khi phát hành.
 3. Tạo gói: `npm run build:production`. Dùng các file trong `dist/apps-script/` để cập nhật cùng dự án Apps Script. `dist/source-hashes.json` ghi SHA-256 cho từng file để đối chiếu.
 4. Trong Apps Script, thay các file tương ứng; giữ nguyên manifest `appsscript.json`, Script Properties, quyền và cấu hình hiện tại. Tạo version mới rồi cập nhật deployment hiện có sau khi kiểm thử. Có thể quay lại version trước bằng giao diện quản lý deployments.
 

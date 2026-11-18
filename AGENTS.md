@@ -1,30 +1,48 @@
-# Ponytail, lazy senior dev mode
+# Project guidance
 
-You are a lazy senior developer. The best code is the code never written. You solve the whole problem with the least new code. End your reply with one or two lines: what you skipped or did not check, and any risk the user must know.
+## Project overview
+- Purpose: HCM Ops Hub, an SPX dashboard for HUB operations, KPI, forecast, backlog and workforce.
+- Stack: Google Apps Script, HTML/CSS/JavaScript; Node.js >=18 local runtime; Google Sheets, BigQuery and Supabase data sources.
+- Architecture: [docs/architecture.md](docs/architecture.md).
+- Local setup and limitations: [docs/local-development.md](docs/local-development.md).
 
-## Before you write
+## Working rules
+- Read relevant instructions before editing; check git status and preserve user changes.
+- Find symbols, callers and modules before reading large files, especially Code.gs, Javascript.html and Styles.html.
+- Make the smallest complete change; reuse existing patterns and avoid unrelated refactors or new abstractions.
+- Include affected callers, tests and fixtures; preserve validation, error handling and accessibility.
+- Preserve Vietnamese text, file encoding and existing line endings.
+- Do not change public interfaces or data contracts without approval.
+- Edit shared root .gs/.html sources, not generated dist files. Keep DailyKPIDirect.gs and its duplicate Deoloyments.gs identical.
 
-Read the task and the code it touches. List every place your change must reach: callers, tests, fixtures, config, exports. Check what your change could break for users: data it would destroy or expose, callers that stop working. That is scope. Extra features are not.
+## Safety boundaries
+- Do not read or print secrets, tokens or credential files; report only required configuration names.
+- Do not modify production data.
+- Ask before deploying, migrating, installing dependencies or changing authentication/authorization.
+- Prefer mocks or sanitized fixtures. Local frontend code can still call Supabase; do not assume local mode is offline.
+- Do not run ingestion/rider-repair scripts as part of dashboard setup.
 
-## The smallest complete change
+## Verified commands
+- Install: no root dependencies to install; optional tooling prerequisites are documented in local setup.
+- Local run: npm run dev or ./start-local.ps1; requires imported workbook data.
+- Lint/typecheck: not available. npm run check checks syntax and local initialization; it requires workbook data and can write local state/provenance.
+- Tests: npm run test:local runs checks and API suites with isolated synthetic data; no workbook or install needed. See local setup for legacy data tests.
+- Package: npm run build:production runs check and writes dist/; it does not deploy.
 
-Take the first option that fully works:
+## Definition of done
+- Run checks relevant to the change; add or update tests for non-trivial logic.
+- Report modified files, behavior changes, exact checks run and their results.
+- Clearly state what was not tested and why; missing private data is not a passing check.
+- End with one or two lines stating omitted checks/work and material risks.
 
-1. Does it need to exist? Skip features, options and flexibility nobody asked for, and name them in one line. A vague request ("build me X") gets the smallest version that does the core job.
-2. Already in this codebase (a helper, component, service, pattern)? Use it the way the surrounding code does.
-3. Standard library or a platform feature? Use it, unless the project has its own. A house component beats a native widget.
-4. An installed dependency? Use it. Never add a dependency for a few lines.
-5. Can it be one line a reader gets at a glance? One line.
-6. Otherwise: the minimum code that works.
+## Automatic agent coordination
+- For project tasks, the main agent must read and follow [.cursor/rules/auto-orchestration.mdc](.cursor/rules/auto-orchestration.mdc), including when its client does not load Cursor rules automatically.
+- The user authorizes automatic delegation to Orca workers under that policy. Dispatched workers must complete their assigned task without recursively delegating.
 
-- Be lazy about the solution, never about the change itself: finish every part the task needs, including the callers, tests and fixtures your change breaks.
-- No abstraction, wrapper, type conversion, option, config, boilerplate or "for later" code nobody asked for. Keep values in the form the platform already gives you. Deletion beats addition. Keep the structure the codebase already has: its layers, interfaces and conventions.
-- The shortest working diff wins, once you know everything it must touch. A one-liner that needs decoding is not short.
-- Comment only the why the code cannot show, in one line.
-- Bug fix: before you edit, grep every caller of the function you touch, then fix the root cause once in the shared code.
-- Code you move or merge keeps its error handling and validation.
-- Between options of equal size, take the one that is correct on edge cases.
-- Lazy code without its check is unfinished: new non-trivial logic (a branch, a loop, a parser, money or security, or a whole new script or app) leaves one small test or an assert-based self-check. Trivial changes need none.
-- A shortcut with a known limit gets a code comment in this form: `shortcut: <the limit>, <when to upgrade>`.
+## Shared interface style
+- For every UI task, read and follow [.cursor/rules/ui-consistency.mdc](.cursor/rules/ui-consistency.mdc), including when the client does not automatically load Cursor rules. Apply the same policy to delegated implementers, testers and reviewers.
 
-Never cut: validation at trust boundaries, error handling that prevents data loss, security, accessibility, the calibration real hardware needs, anything the user asked for.
+## Agent names
+- User alias "Anh cả" means the primary Codex coordinator in this project.
+- User alias "Anh 2" means the Antigravity agent (Orca agent id: antigravity); "angravity" is the user's spelling for the same agent.
+- Resolve these aliases automatically in task assignments and conversation; an alias alone does not authorize new work or extra permissions.

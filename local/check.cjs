@@ -1,5 +1,10 @@
 const vm = require('node:vm');
 const { sources, read } = require('./source.cjs');
+// Styles is included in the document head; bare CSS becomes page text.
+const outsideStyles = read('Styles.html')
+  .replace(/<style\b[^>]*>[\s\S]*?<\/style\s*>/gi, '')
+  .replace(/<!--[\s\S]*?-->/g, '').trim();
+if (outsideStyles) throw Error('Styles.html contains content outside style tags.');
 const backend = sources().filter(n => n.endsWith('.gs')).map(n => '\n// ' + n + '\n' + read(n)).join('\n');
 new vm.Script(backend, { filename: 'apps-script-combined.gs' });
 // Check the exported D0 file on its own: local API overrides must not mask

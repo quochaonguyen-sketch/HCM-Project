@@ -1,0 +1,38 @@
+---
+description: Keep every HCM Ops Hub page consistent with the shared application style
+alwaysApply: true
+---
+
+# Shared HCM interface style
+
+- Apply this policy to all new or changed pages, modules, dialogs and charts, including HTML returned by JavaScript. Coordinators must include it in UI worker specs; testers and reviewers must check it.
+- Preserve the existing compact operations dashboard style. Do not invent a new visual theme for an individual page or redesign unrelated pages.
+- Before editing, inspect the shared shell in index.html, the relevant selectors and their final overrides in Styles.html, and the same component in another active page. Record which existing pattern is being reused. Theme.html is currently an extension point, not a separate theme implementation.
+
+## One source for appearance
+
+- Put reusable visual rules in root Styles.html. Reuse existing shared classes before adding CSS; do not copy a page's stylesheet into another module or edit generated dist files.
+- Inherit the application font (Segoe UI, Tahoma, Arial, sans-serif). No page-specific font imports. Match the shared header, body, helper and table hierarchy; do not shrink text just to fit a layout.
+- Use semantic CSS variables from the shared theme: --bg, --panel, --text, --muted, --line and --shadow, plus existing brand/status tokens such as --orange, --navy, --blue, --green, --amber and --red. Inspect scope and dark-mode overrides before using a token.
+- Do not introduce raw color values, page-specific palettes, or duplicate aliases for an existing purpose. Reuse established semantic status colors; accompany status colors with text or icons.
+- Reuse the shell's content width, page header, filter toolbar, panel, table, badge and dialog patterns. Keep matching components identical in spacing, height, typography, border radius, border and shadow across pages.
+- Match an existing shared spacing value first. For a genuinely new shared pattern use a 4px scale (4, 8, 12, 16, 24, 32px); define its reusable rule once instead of choosing values per page.
+- Use existing button variants for primary, secondary and destructive actions. Export actions use app-btn-export and the existing appExportIcon() helper in Javascript.html. Reuse the existing icon system; no new icon library or emoji as interface icons.
+- Reuse common filter controls and date/HUB selection behavior. Keep labels, action order, Vietnamese terminology, date/number formatting and units consistent with the equivalent existing workflow.
+- Tables share header treatment, row density, numeric alignment and hover/selection states. Use tabular figures for comparable metrics; keep units and precision consistent for the same metric. Charts retain consistent series colors and legends for the same measures.
+
+## Controlled extensions
+
+- A module may add scoped CSS only for a unique layout or data visualization. It must inherit shared typography, colors and control styles and must not globally redefine body, button, input, table or shared classes.
+- Avoid new inline cosmetic styles, !important rules and repeated overrides appended to defeat the cascade. Dynamic geometry (for example chart positions) may remain inline. Fix the owning shared selector when the problem is shared.
+- If no common component fits, add the smallest shared variant in Styles.html and use it in affected callers. If a new semantic token is necessary, define it centrally with light/dark behavior. Explain the addition in the change report; do not silently create a page theme.
+- Preserve existing IDs, event bindings, loading/disabled behavior, validation and data contracts when adopting shared markup. Existing legacy differences are not precedents for new divergence; normalize touched components only, unless a wider cleanup is requested.
+
+## Required UI review
+
+- Check loading, empty, error, populated, hover, focus, active and disabled states that the change affects. Preserve visible focus, keyboard access, associated field labels and accessible names for icon buttons.
+- Check normal-text contrast (at least 4.5:1), usable controls on touch screens, and reduced-motion preferences for new animation. Do not rely on color or hover alone.
+- Follow the existing .design-dark mechanism; validate text, surfaces, borders, forms, charts and dialogs in both themes. A page must not introduce its own independent theme toggle.
+- Reuse existing breakpoints. At narrow widths let headers and filters wrap; contain wide data tables in scroll wrappers. Do not force the entire page to overflow or hide required data/actions to make it fit.
+- For UI changes compare the changed page with an existing page using the same shared patterns, at desktop and narrow viewport widths, in light and dark modes. Use the approved browser workflow and isolated data; do not call production services without authorization.
+- Run relevant local checks and report which visual states/viewports were actually inspected. If browser validation is unavailable, explicitly mark visual consistency as unverified; syntax tests alone do not prove it.

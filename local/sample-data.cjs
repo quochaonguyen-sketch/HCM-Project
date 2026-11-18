@@ -3,7 +3,7 @@ const fs=require('node:fs');
 const path=require('node:path');
 function seed(text){let h=2166136261;for(const c of String(text))h=Math.imul(h^c.charCodeAt(0),16777619);return (h>>>0)/4294967295;}
 function day(value){return value instanceof Date?new Date(+value+7*3600000).toISOString().slice(0,10):String(value||'').slice(0,10);}
-function prepareData(data){
+function prepareData(data, outputDir=__dirname){
   const front=data.frontend.sheets,back=data.backend.sheets;
   const ledger=[];
   const today=new Intl.DateTimeFormat('en-CA',{timeZone:'Asia/Ho_Chi_Minh',year:'numeric',month:'2-digit',day:'2-digit'}).format(new Date());
@@ -138,7 +138,7 @@ function prepareData(data){
     files:Object.values(data).map(b=>b.name),hubs:permissions.length,
     mockCellsAndRows:ledger.length,mockSources:['Missing KPI cells and current-month HUB/day rows','Missing D0, attendance, DTC and FC coverage','BigQuery FLM volume, claims and lost adapters'],
     policy:'Existing nonblank workbook values are preserved. Mock data is deterministic and local only. Local settings changes are stored separately.',ledger};
-  fs.writeFileSync(path.join(__dirname,'provenance.private.json'),JSON.stringify(provenance,null,2));
+  fs.writeFileSync(path.join(outputDir,'provenance.private.json'),JSON.stringify(provenance,null,2));
   return provenance;
 }
 module.exports={prepareData,seed,day};

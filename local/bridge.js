@@ -28,7 +28,7 @@
   document.addEventListener('DOMContentLoaded', function () {
     var badge = document.createElement('div');
     var info=window.__LOCAL_DATA__||{};
-    badge.textContent = 'LOCAL · Excel + MOCK · '+(info.hubs||0)+' HUBs · Không kết nối production';
+    badge.textContent = 'LOCAL · Excel + MOCK · '+(info.hubs||0)+' HUBs'+(info.supabasePublishableKey?' · Supabase REST':'');
     badge.title = 'Dữ liệu từ hai file Excel. Các ô/dòng thiếu và nguồn BigQuery dùng MOCK. Xem /api/local-data để kiểm tra nguồn.';
     badge.style.cssText = 'position:fixed;bottom:0;left:0;right:0;z-index:2147483647;background:#9a3412;color:white;text-align:center;font:12px Arial;padding:5px;pointer-events:none';
     document.body.appendChild(badge);

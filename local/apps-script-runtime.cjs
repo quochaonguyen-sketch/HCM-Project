@@ -4,21 +4,22 @@ const vm = require('node:vm');
 const crypto = require('node:crypto');
 const zlib = require('node:zlib');
 const { sources, read } = require('./source.cjs');
+const dataDir = process.env.HCM_LOCAL_DATA_DIR || __dirname;
 
 function createRuntime() {
-  const file = path.join(__dirname,'workbooks.private.json');
+  const file = path.join(dataDir,'workbooks.private.json');
   if (!fs.existsSync(file)) throw Error('Run local/import-workbooks.py first.');
   const data = JSON.parse(fs.readFileSync(file,'utf8'),(_,v)=>v&&v.$date?new Date(v.$date.length===10?v.$date+'T00:00:00+07:00':v.$date+'+07:00'):v);
-  const peopleFile=path.join(__dirname,'people-source.private.json');
+  const peopleFile=path.join(dataDir,'people-source.private.json');
   if(fs.existsSync(peopleFile))Object.assign(data.backend.sheets,JSON.parse(fs.readFileSync(peopleFile,'utf8'),(_,v)=>v&&v.$date?new Date(v.$date+'+07:00'):v).sheets);
   const { prepareData } = require('./sample-data.cjs');
-  const provenance = prepareData(data);
-  const fmFile=path.join(__dirname,'fm-source.private.json');
+  const provenance = prepareData(data, dataDir);
+  const fmFile=path.join(dataDir,'fm-source.private.json');
   if(fs.existsSync(fmFile)){const fm=JSON.parse(fs.readFileSync(fmFile,'utf8'));data[fm.spreadsheetId]=fm;}
   // Real hourly sample: never fill missing HUBs or hours with mock values.
-  const hourlyFile=path.join(__dirname,'hourly.private.json');
+  const hourlyFile=path.join(dataDir,'hourly.private.json');
   if(fs.existsSync(hourlyFile))data.backend.sheets['Throughput Hourly D0']=JSON.parse(fs.readFileSync(hourlyFile,'utf8'));
-  const stateFile=path.join(__dirname,'state.private.json');
+  const stateFile=path.join(dataDir,'state.private.json');
   const saved=fs.existsSync(stateFile)?JSON.parse(fs.readFileSync(stateFile,'utf8')):{};
   const props=Object.assign({APP_DB_SHEET_ID:'frontend',D0_DB_SHEET_ID:'backend',KPI_DAILY_DB_SHEET_ID:'frontend'},saved.properties||{});
   // Rebuild derived caches from the imported workbook on every server restart.
@@ -118,4 +119,4 @@ function createRuntime() {
     }
   };
 }
-module.exports={createRuntime};
+module.exports={createRuntime,dataDir};

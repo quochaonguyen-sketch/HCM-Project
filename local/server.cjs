@@ -2,10 +2,20 @@ const http = require('node:http');
 const fs = require('node:fs');
 const path = require('node:path');
 const { read } = require('./source.cjs');
+const { createRuntime, dataDir } = require('./apps-script-runtime.cjs');
 let runtime;
 function getRuntime() {
-  if (!runtime) runtime = require('./apps-script-runtime.cjs').createRuntime();
+  if (!runtime) runtime = createRuntime();
   return runtime;
+}
+function localSupabaseKey() {
+  const configPath = path.join(dataDir, 'supabase.private.json');
+  if (!fs.existsSync(configPath)) return '';
+  const key = JSON.parse(fs.readFileSync(configPath, 'utf8')).publishableKey;
+  if (typeof key !== 'string' || !/^sb_publishable_[A-Za-z0-9_-]+$/.test(key)) {
+    throw Error('Expected a Supabase publishable key in local configuration.');
+  }
+  return key;
 }
 function page() {
   const app = getRuntime();
@@ -16,7 +26,8 @@ function page() {
   // Initialize the Apps Script adapter synchronously in the document. The UI
   // starts immediately and must not depend on a separate script request.
   const bridge = 'window.__LOCAL_DATA__ = ' + JSON.stringify({
-    mode:app.provenance.mode,hubs:app.provenance.hubs,mockCellsAndRows:app.provenance.mockCellsAndRows
+    mode:app.provenance.mode,hubs:app.provenance.hubs,mockCellsAndRows:app.provenance.mockCellsAndRows,
+    supabasePublishableKey:localSupabaseKey()
   }).replace(/</g,'\\u003c') + ';\n' + fs.readFileSync(path.join(__dirname, 'bridge.js'), 'utf8');
   return html.replace('<head>', () => '<head><script data-local-bridge>' + bridge + '</script>');
 }

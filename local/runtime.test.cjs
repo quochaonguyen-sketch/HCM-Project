@@ -1,7 +1,7 @@
 const assert=require('node:assert/strict');
 const fs=require('node:fs');
 const path=require('node:path');
-const {createRuntime}=require('./apps-script-runtime.cjs');
+const {createRuntime,dataDir}=require('./apps-script-runtime.cjs');
 const r=createRuntime(),day=r.provenance.asOf,month=day.slice(0,7);
 const permission=r.context.getPermissionModel_(false);
 const codes=new Set(permission.stations.map(h=>h.hubCode));
@@ -15,7 +15,7 @@ assert(monthly.rows.some(row=>row.fmOntime.numeric!==null));
 const daily=r.call('getDailyKpiClientPeriodCache',[month,false]);
 assert(daily.rows.length>=codes.size);
 assert(daily.rows.every(row=>codes.has(row[1])&&row[0].startsWith(month)));
-const raw=JSON.parse(fs.readFileSync(path.join(__dirname,'workbooks.private.json'),'utf8'));
+const raw=JSON.parse(fs.readFileSync(path.join(dataDir,'workbooks.private.json'),'utf8'));
 for(const sheet of ['KPI Daily','KPI Result']){
   const original=raw.frontend.sheets[sheet],prepared=r.data.frontend.sheets[sheet];
   original.forEach((row,i)=>row.forEach((value,j)=>{
@@ -54,5 +54,5 @@ assert.throws(()=>r.call('getD0Riders',[forbidden.hubCode,1,'driver_name','asc',
 r.context.Session.getActiveUser=()=>({getEmail:()=>'unknown@example.test'});
 assert.throws(()=>r.call('getKpiClientMonthCache',[month,false]));
 assert.throws(()=>r.call('getDb_',[]));
-console.log('PASS: Excel source values preserved; KPI monthly/daily, D0/riders/hourly attendance, map, DTC/FC, forecast, backlog and source health.');
+console.log('PASS: input values preserved; KPI monthly/daily, D0/riders/hourly attendance, map, DTC/FC, forecast, backlog and source health.');
 console.log('PASS: FLM volume/claims/lost mock sources; SUP filtering, unauthorized HUB and unknown account denied.');

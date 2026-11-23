@@ -74,14 +74,256 @@ function flmTeamContext_(module,request){
   const today=Utilities.formatDate(new Date(),'Asia/Ho_Chi_Minh','yyyy-MM-dd'),maxAnchor=flmTeamShift_(today,1);if(day>maxAnchor)throw Error('FLM_FUTURE_ANCHOR');
   const stations=(getPermissionModel_(false).stations||[]),owners={},byCode={};
   stations.forEach(h=>{const code=String(h.hubCode);byCode[code]=h;[h.hubName,h.stationName,h.hubCode].filter(Boolean).forEach(name=>{const alias=flmTeamAlias_(name);if(!owners[alias])owners[alias]=new Set();owners[alias].add(code)})});
-  const aliases={},ambiguous=[];
-  Object.keys(owners).forEach(alias=>{const matches=Array.from(owners[alias]);if(matches.length===1&&codes.indexOf(matches[0])>=0)aliases[alias]=matches[0];else if(matches.length>1&&matches.some(c=>codes.indexOf(c)>=0))ambiguous.push(alias)});
-  const ctx={access:access,scope:{type:scope.type,value:scope.value,label:scope.label,hubCount:codes.length},codes:codes,aliases:aliases,byCode:byCode,anchor:day,from:flmTeamShift_(day,-30),closing:flmTeamShift_(day,-1),to:flmTeamShift_(day,7),warnings:ambiguous.length?[ambiguous.length+' duplicate HUB aliases were excluded from the query.']:[]};
+  const aliases={},masterAliases={},ambiguous=[];
+  Object.keys(owners).forEach(alias=>{const matches=Array.from(owners[alias]);if(matches.length===1){masterAliases[alias]=matches[0];if(codes.includes(matches[0]))aliases[alias]=matches[0];}else if(matches.some(c=>codes.includes(c)))ambiguous.push(alias)});
+  const ctx={access:access,scope:{type:scope.type,value:scope.value,label:scope.label,hubCount:codes.length},codes:codes,aliases:aliases,masterAliases:masterAliases,byCode:byCode,anchor:day,from:flmTeamShift_(day,-30),closing:flmTeamShift_(day,-1),to:flmTeamShift_(day,7),warnings:ambiguous.length?[ambiguous.length+' duplicate HUB aliases were excluded from the query.']:[]};
   ctx.params=[{name:'stations',parameterType:{type:'ARRAY',arrayType:{type:'STRING'}},parameterValue:{arrayValues:Object.keys(aliases).map(value=>({value:value}))}},...['from','closing','anchor','to'].map(k=>({name:k,parameterType:{type:'DATE'},parameterValue:{value:k==='anchor'?day:ctx[k]}}))];
   return ctx;
 }
 function flmTeamTable_(name){return '`'+FLM_TEAM_CFG.project+'.'+FLM_TEAM_CFG.dataset+'.'+name+'`'}
 function flmTeamStationSql_(column){return "REGEXP_REPLACE(REGEXP_REPLACE(REGEXP_REPLACE(UPPER(TRIM("+column+")),r'\\s+',' '),r'\\s+HUB$',''),r'\\s*/\\s*','/') IN UNNEST(@stations)"}
+
+const FLM_LOST_REST_URL='https://aqvcybxcfgicxmzpczgd.supabase.co/rest/v1/lost_orders';
+const FLM_LOST_SUMMARY_FIELDS=['ngay_chot','hub','trang_thai_he_thong','last_status_spx','log_loi_cuoi','loai_yeu_cau','cod_cogs','so_tien_den_bu','ly_do','ket_qua'];
+const FLM_LOST_DETAIL_FIELDS=FLM_LOST_SUMMARY_FIELDS.concat(['spx_tracking','khu_vuc','thoi_gian_trang_thai_cuoi','rider','co_log_loi','thoi_gian_log_loi','last_user']);
+
+function flmLostHubCode_(raw,aliases){
+  const alias=flmTeamAlias_(raw);
+  return Object.prototype.hasOwnProperty.call(aliases,alias)?aliases[alias]:null;
+}
+
+function flmLostAllowsDetails_(access){
+  return ['ROM','ADMIN','SAOM','HUB','LEAD','SUP'].includes(access.rank);
+}
+
+function flmLostContext_(page,request){
+  try{
+    const r=request||{};
+    const ctx=flmTeamContext_('compensated',{scopeType:r.scopeType,scopeValue:r.scopeValue,selectedHubCodes:r.selectedHubCodes});
+    assertPageAccess_(ctx.access,[page]);
+    return ctx;
+  }catch(_){throw Error('LOST_ACCESS');}
+}
+
+function flmLostStationFilters_(ctx){
+  const allowed=new Set(ctx.codes.map(String)),names=new Set();
+  Object.keys(ctx.aliases).forEach(alias=>{
+    if(!allowed.has(ctx.aliases[alias]))return;
+    names.add(alias);
+    names.add(alias+' HUB');
+    if(alias.includes('/')){
+      const spaced=alias.replace(/\//g,' / ');
+      names.add(spaced);
+      names.add(spaced+' HUB');
+    }
+  });
+  ctx.codes.forEach(code=>{
+    const station=ctx.byCode[code]||{};
+    [station.hubName,station.stationName,String(code)].filter(Boolean).forEach(name=>{
+      if(flmLostHubCode_(name,ctx.aliases)===String(code))names.add(String(name).trim());
+    });
+  });
+  const filters=[];
+  // PostgREST treats * as a LIKE wildcard. Use exact matching for literal stars.
+  [false,true].forEach(exact=>{
+    let batch=[],size=0;
+    function finish(){
+      if(batch.length)filters.push('&hub='+(exact?'in.':'ilike(any).')+
+        encodeURIComponent((exact?'(':'{')+batch.join(',')+(exact?')':'}')));
+      batch=[];size=0;
+    }
+    names.forEach(name=>{
+      if(name.includes('*')!==exact)return;
+      const literal=JSON.stringify(exact?name:name.replace(/[\\%_]/g,'\\$&'));
+      const length=encodeURIComponent(literal).length+3;
+      if(length>1200)throw Error('LOST_UPSTREAM');
+      if(size+length>1200)finish();
+      batch.push(literal);size+=length;
+    });
+    finish();
+  });
+  return filters;
+}
+
+function flmLostFetch_(ctx,from,to,fields,accept,stationScoped){
+  const key=PropertiesService.getScriptProperties().getProperty('SUPABASE_LOST_SECRET_KEY');
+  if(typeof key!=='string'||!/^sb_secret_[A-Za-z0-9_-]+$/.test(key))throw Error('LOST_CONFIG');
+  const allowed=new Set(ctx.codes),aliases=ctx.aliases,deadline=Date.now()+35000;
+  const order=stationScoped?'spx_tracking.asc':'ngay_chot.desc,spx_tracking.asc';
+  const query='?select='+fields.join(',')+'&order='+order+'&spx_tracking=neq.'+
+    '&ngay_chot=match.'+encodeURIComponent('^[0-9]{4}-[0-9]{2}-[0-9]{2}$')+
+    (from?'&ngay_chot=gte.'+from:'')+'&ngay_chot=lte.'+to+'&limit=1000';
+  try{
+    let remaining=100;
+    for(const scope of stationScoped?flmLostStationFilters_(ctx):['']){
+      let offset=0,cursor='';
+      const seen=new Set();
+      while(true){
+        if(remaining--<=0||Date.now()>=deadline)throw Error();
+        const pageFilter=stationScoped?(cursor?'&spx_tracking=gt.'+encodeURIComponent(cursor):''):'&offset='+offset;
+        const response=UrlFetchApp.fetch(FLM_LOST_REST_URL+query+scope+pageFilter,{
+          method:'get',headers:{apikey:key},followRedirects:false,muteHttpExceptions:true
+        });
+        if(Date.now()>=deadline)throw Error();
+        const code=response.getResponseCode();
+        if(code===401||code===403)return 'LOST_CONFIG';
+        if(code!==200&&code!==206)throw Error();
+        const rows=JSON.parse(response.getContentText());
+        if(!Array.isArray(rows)||rows.length>1000)throw Error();
+        if(!rows.length)break;
+        for(const row of rows){
+          if(!row||typeof row.hub!=='string'||typeof row.ngay_chot!=='string'){
+            if(stationScoped)throw Error();
+            continue;
+          }
+          if(stationScoped){
+            const id=row.spx_tracking;
+            if(typeof id!=='string'||!id.trim()||id.length>200||seen.has(id))throw Error();
+            seen.add(id);cursor=id;
+          }
+          const hubCode=flmLostHubCode_(row.hub,aliases);
+          if(!allowed.has(hubCode))continue;
+          let date;
+          try{date=flmTeamDay_(row.ngay_chot);}catch(_){continue;}
+          if(date<'0001-01-01'||date>to||(from&&date<from))continue;
+          if(accept(row,hubCode))return;
+        }
+        offset+=rows.length;
+      }
+    }
+  }catch(_){throw Error('LOST_UPSTREAM');}
+}
+
+function flmLostSupabaseStats_(ctx,from){
+  const days=new Map();
+  const error=flmLostFetch_(ctx,from,ctx.closing,['spx_tracking','ngay_chot','hub','created_at'],(row,hubCode)=>{
+    const date=row.ngay_chot,current=days.get(date)||{ids:new Set(),hubs:new Set(),latest:null};
+    if(current.ids.has(row.spx_tracking))return;
+    current.ids.add(row.spx_tracking);current.hubs.add(hubCode);
+    const stamp=Date.parse(row.created_at);
+    if(Number.isFinite(stamp)&&(current.latest===null||stamp>current.latest))current.latest=stamp;
+    days.set(date,current);
+  },true);
+  if(error)throw Error(error);
+  const dates=Array.from(days.keys()).sort(),latestDate=dates[dates.length-1]||null,day=days.get(latestDate);
+  return {dates:dates,latestDate:latestDate,rows:day?day.ids.size:0,reportingHubs:day?day.hubs.size:0,
+    latestAt:day&&day.latest!==null?new Date(day.latest).toISOString():null};
+}
+
+function flmLostSupabaseHubOrders_(ctx,hubCode){
+  const scoped=Object.assign({},ctx,{codes:[hubCode]}),rows=new Map();
+  const monthStart=ctx.closing.slice(0,7)+'-01',from=monthStart<ctx.from?monthStart:ctx.from;
+  const error=flmLostFetch_(scoped,from,ctx.closing,['spx_tracking','ngay_chot','hub','ly_do','so_tien_den_bu'],row=>{
+    if(rows.has(row.spx_tracking))return;
+    const amount=row.so_tien_den_bu==null||String(row.so_tien_den_bu).trim()===''?null:flmTeamNum_(row.so_tien_den_bu);
+    rows.set(row.spx_tracking,{shipmentId:row.spx_tracking,date:row.ngay_chot,reason:row.ly_do||'Chưa ghi lý do',amount:amount});
+  },true);
+  if(error)throw Error(error);
+  return Array.from(rows.values()).sort((a,b)=>(b.amount||0)-(a.amount||0)||b.date.localeCompare(a.date)).slice(0,1000);
+}
+
+function flmLostResult_(get){
+  try{return get();}catch(err){
+    const code=err&&err.message;
+    return {error:['LOST_ACCESS','LOST_RANGE','LOST_CONFIG'].includes(code)?code:'LOST_UPSTREAM'};
+  }
+}
+
+function flmTeamGetLostSourceStatus(request){
+  return flmLostResult_(()=>{
+    const module=request&&request.module;
+    if(module!=='snapshot'&&module!=='compensated')throw Error('LOST_ACCESS');
+    const ctx=flmLostContext_(module==='snapshot'?'dashboard':'compensated',request);
+    let latestDate=null;
+    const error=flmLostFetch_(ctx,null,ctx.closing,['ngay_chot','hub'],row=>{latestDate=row.ngay_chot;return true;});
+    if(error)throw Error(error);
+    return {latestDate:latestDate};
+  });
+}
+
+function flmTeamGetLostReport(request){
+  return flmLostResult_(()=>{
+    const ctx=flmLostContext_('compensated',request),{from,to}=request||{};
+    try{
+      if(typeof from!=='string'||typeof to!=='string'||flmTeamDay_(from)<'0001-01-01'||flmTeamDay_(to)>ctx.closing||from>to||Date.parse(to)-Date.parse(from)>30*86400000)throw Error();
+    }catch(_){throw Error('LOST_RANGE');}
+    const details=flmLostAllowsDetails_(ctx.access),rows=[],totals=details?null:flmLostSummary_(ctx);
+    const fields=details?FLM_LOST_DETAIL_FIELDS:FLM_LOST_SUMMARY_FIELDS;
+    const error=flmLostFetch_(ctx,from,to,fields,(row,hubCode)=>{
+      if(details){
+        if(typeof row.spx_tracking!=='string'||!row.spx_tracking.trim())return;
+        const item={hubCode:hubCode};
+        fields.forEach(field=>{if(Object.prototype.hasOwnProperty.call(row,field))item[field]=row[field];});
+        rows.push(item);
+      }else totals.add(row,hubCode);
+    });
+    if(error)throw Error(error);
+    return details?{rows:rows}:{summary:totals.result()};
+  });
+}
+
+function flmLostReasonBucket_(reason){
+  // Logs and free-text reasons can contain shipment or staff identifiers.
+  const reasonLabels=['Đơn hàng làm mất bởi Rider','Đơn hàng mất tại Hub','Đơn hàng rider Pick chưa bàn giao tại hub','Buyer/Seller chưa nhận hàng','Đơn hàng tranh chấp đối soát','Đền bù D0','Chưa ghi lý do'];
+  const group=String(reason||'Chưa ghi lý do').replace(/\s*·.*$/,'').trim();
+  return reasonLabels.includes(group)?group:'Lý do khác';
+}
+
+function flmLostReportValues_(row){
+  // Match flmNormalizeLostRow_ for lost_orders, including raw JSON placeholders.
+  let log=row.log_loi_cuoi;
+  if(typeof log==='string'){
+    let decoded;
+    try{decoded=JSON.parse(log);}catch(_){}
+    log=decoded&&typeof decoded==='object'&&!Array.isArray(decoded)&&
+      ['error','reason','amount','cogs','rider'].some(key=>Object.prototype.hasOwnProperty.call(decoded,key))
+      ?decoded:log.trim()?{error:log}:null;
+  }
+  const positive=value=>Math.max(0,flmTeamNum_(value)||0);
+  const money=value=>value!=null&&String(value).trim()?flmTeamNum_(value):null;
+  const cogs=money(row.cod_cogs);
+  const amount=money(row.so_tien_den_bu)??(positive(log&&log.amount)||positive(cogs)||positive(log&&log.cogs));
+  const claimType=String(row.loai_yeu_cau||'Đền bù D0');
+  let reason='Chưa ghi lý do';
+  if(typeof row.ly_do==='string'&&row.ly_do&&row.ly_do!=='Đền bù'&&row.ly_do!==reason)reason=row.ly_do;
+  else if(log&&typeof log.reason==='string'&&log.reason&&log.reason!=='Đền bù')reason=log.reason;
+  else if(log&&typeof log.error==='string'&&log.error.trim())reason=log.error.trim();
+  else if(claimType!=='Đền bù')reason=claimType;
+  return {amount:amount,cogs:cogs,reason:reason};
+}
+
+function flmLostSummary_(ctx){
+  const hubs=new Map(),days=new Map(),reasons=new Map(),total={n:0,amount:0,knownAmount:0,missingAmount:0};
+  ctx.codes.forEach(code=>{
+    const h=ctx.byCode[code]||{};
+    hubs.set(code,{hubCode:code,station:h.hubName||h.stationName||code,totalOrders:0,totalCogs:0,hvOrders:0,hvCogs:0,fm:0,lm:0,rt:0,eha:0});
+  });
+  return {
+    add(row,code){
+      const {amount,cogs,reason}=flmLostReportValues_(row);
+      const hv=cogs??amount;
+      const reasonLabel=flmLostReasonBucket_(reason);
+      reasons.set(reasonLabel,(reasons.get(reasonLabel)||0)+1);
+      const status=String(row.last_status_spx||row.trang_thai_he_thong||'').toLowerCase(),rsn=reason.toLowerCase();
+      const h=hubs.get(code);
+      h.totalOrders++;h.totalCogs+=amount;
+      if(hv>=1000000){h.hvOrders++;h.hvCogs+=hv;}
+      if(/fm|pickup/.test(status)||rsn.includes('pick'))h.fm++;
+      if(/lm|deliver|assign/.test(status))h.lm++;
+      if(/return|rt|hoàn/.test(status)||rsn.includes('hoàn'))h.rt++;
+      if(status.includes('missing')||String(row.ket_qua||'').toLowerCase().includes('eha')||/missing|tranh chấp/.test(rsn))h.eha++;
+      const date=row.ngay_chot,day=days.get(date)||{date:date,n:0,amount:0,knownAmount:0,missingAmount:0};
+      days.set(date,day);
+      [total,day].forEach(item=>{item.n++;item.amount+=amount;item.knownAmount+=amount;});
+    },
+    result(){
+      return {total:total,hubStats:Array.from(hubs.values()).sort((a,b)=>b.totalOrders-a.totalOrders||b.totalCogs-a.totalCogs),
+        series:Array.from(days.values()).sort((a,b)=>a.date.localeCompare(b.date)),
+        reasons:Array.from(reasons,([reason,n])=>({reason:reason,n:n})).sort((a,b)=>b.n-a.n)};
+    }
+  };
+}
+
 function flmTeamMetadata_(table,fields){
   if(typeof BigQuery==='undefined')throw Error('BigQuery API is not enabled in Apps Script. See FLM-Integration-README.md.');
   const t=BigQuery.Tables.get(FLM_TEAM_CFG.project,FLM_TEAM_CFG.dataset,table),names=(t.schema&&t.schema.fields||[]).map(f=>f.name);
@@ -185,7 +427,8 @@ function flmTeamGetSourceStatus(request){
   const ctx=contexts.backlog||contexts.compensated;
   // Bound scans to one year. Forecast checks also include the existing D+7 horizon.
   ctx.from=flmTeamShift_(today,-365);ctx.params=ctx.params.map(p=>p.name==='from'?Object.assign({},p,{parameterValue:{value:ctx.from}}):p);
-  return flmTeamCached_('source-status:'+module,ctx,[{revision:'scoped-dates-v1'}],r.force===true,()=>{
+  const revision=module==='backlog'?'scoped-dates-v1':'scoped-lost-dates-v4:'+Object.keys(contexts).sort().join(',');
+  return flmTeamCached_('source-status:'+module,ctx,[{revision:revision}],r.force===true,()=>{
     const checkedAt=new Date().toISOString(),sources=[];
     function result(id,label,rows,meta,expected,kind){
       const sorted=rows.filter(row=>/^\d{4}-\d{2}-\d{2}$/.test(String(row.d||''))).sort((a,b)=>String(b.d).localeCompare(String(a.d))),latest=sorted[0],dates=Array.from(new Set(sorted.map(row=>String(row.d))));
@@ -228,13 +471,25 @@ function flmTeamGetSourceStatus(request){
         }
       }
       try{
-        if(typeof SpreadsheetApp==='undefined')throw Error('SpreadsheetApp is unavailable');
-        const ssLost=SpreadsheetApp.openById(flmTeamLostDbSheetId_()),sheet=ssLost.getSheetByName('LOST_PIVOT')||ssLost.getSheetByName('LOST');
-        if(sheet&&sheet.getLastRow()>1){
-          const lInfo=flmSheetDateStats_(sheet,0);
-          sources.push({id:'lost',label:'Lost records',status:lInfo.dates.length?'AVAILABLE':'EMPTY',latestDate:lInfo.latestDate,latestAt:new Date().toISOString(),dates:lInfo.dates,rows:lInfo.rows,reportingHubs:ctx.codes.length,expectedHubs:ctx.codes.length,expectedDate:today,kind:'records',checkedAt:checkedAt});
+        const lostCtx=contexts.compensated;
+        let current;
+        try{current=flmLostSupabaseStats_(lostCtx,ctx.from);}catch(_){}
+        if(current){
+          sources.push(Object.assign({id:'lost',label:'Lost records',status:current.latestDate?'AVAILABLE':'EMPTY',
+            expectedHubs:lostCtx.codes.length,expectedDate:today,kind:'records',checkedAt:checkedAt},current));
         }else{
-          sources.push({id:'lost',label:'Lost records',status:'EMPTY',latestDate:null,latestAt:null,dates:[],rows:0,reportingHubs:0,expectedHubs:ctx.codes.length,expectedDate:today,kind:'records',checkedAt:checkedAt});
+          if(typeof SpreadsheetApp==='undefined')throw Error('SpreadsheetApp is unavailable');
+          const ssLost=SpreadsheetApp.openById(flmTeamLostDbSheetId_());
+          const info=['LOST_PIVOT','LOST'].reduce((found,name)=>{
+            if(found)return found;
+            try{
+              const sheet=ssLost.getSheetByName(name);
+              return sheet?flmLostSheetStats_(sheet,lostCtx,ctx.from):null;
+            }catch(_){return null;}
+          },null);
+          if(!info)throw Error('LOST_UPSTREAM');
+          sources.push(Object.assign({id:'lost',label:'Lost records',status:info.latestDate?'AVAILABLE':'EMPTY',latestAt:info.latestDate?checkedAt:null,
+            expectedHubs:lostCtx.codes.length,expectedDate:today,kind:'records',checkedAt:checkedAt},info));
         }
       }catch(err){
         sources.push(error('lost','Lost records',err));
@@ -320,11 +575,248 @@ function flmTeamVolumeBuild_(raw,fc,ctx){
   const missingHubs=ctx.codes.map(code=>{const r=records[code+'|'+ctx.closing],h=ctx.byCode[code]||{};return {hubCode:code,station:h.hubName||h.stationName||code,missingRow:!r,missingFields:fields.filter(f=>!r||r[f]==null)}}).filter(h=>h.missingFields.length);
   return {found:raw.length>0,totals:totals,series:series,hubRows:hubRows,dataAsOf:raw.map(r=>r.d).sort().pop()||null,coverage:{expectedHubs:ctx.codes.length,reportingHubs:closing.reportingHubs,metrics:totals.metricCoverage,missingHubs:missingHubs},backlogMismatches:mismatches,limitations:['Detailed aging, inbound and capacity require separate sources; they are not inferred from the volume table.'],formulas:{fm:'max(0, Pickup Requests − Pickup Done)',lm:'max(0, Assigned − Delivered + LM Return Inbound − Returned)',gap:'Actual / Forecast − 1; only HUBs with both inputs',dtc:'Backlog for reporting HUBs / average positive daily volume L14D for the same HUB cohort; only complete cohort days',risk:'Closing-day backlog / average backlog L30D for the same HUB cohort − 1; only complete cohort days (>15% needs review)'}};
 }
+function flmTeamGetRiskSummary(request){
+  const today=Utilities.formatDate(new Date(),'Asia/Ho_Chi_Minh','yyyy-MM-dd');
+  const ctx=flmTeamContext_('compensated',Object.assign({},request,{anchorDate:today}));
+  assertPageAccess_(ctx.access,['compensated']);
+  const key=PropertiesService.getScriptProperties().getProperty('SUPABASE_LOST_SECRET_KEY');
+  const configured=typeof key==='string'&&/^sb_secret_[A-Za-z0-9_-]+$/.test(key);
+  const result=flmTeamCached_('risk-summary:v1',ctx,[{revision:configured?'supabase':'pivot'}],request&&request.force===true,()=>{
+    let sources=null,basis='supabase';
+    if(configured){
+      try{sources=flmRiskSupabaseSources_(ctx,key)}catch(_){}
+    }
+    if(!sources){
+      basis='pivot';
+      let sheets=null;
+      try{sheets=SpreadsheetApp.openById(flmTeamLostDbSheetId_()).getSheets()}catch(_){}
+      sources=[
+        flmRiskPivotSource_(sheets,'alert',['alert_pivot','alert_summary','alert_agg'],ctx),
+        flmRiskPivotSource_(sheets,'urgent',['urgent_pivot','prelost_pivot','urgent_summary'],ctx)
+      ];
+    }
+    const checkedAt=new Date().toISOString();
+    return {today:today,checkedAt:checkedAt,expiresAt:new Date(Date.parse(checkedAt)+FLM_TEAM_CFG.cacheSeconds*1000).toISOString(),sources:sources,basis:basis};
+  });
+  return flmLostAllowsDetails_(ctx.access)?Object.assign({},result,{stationAliases:ctx.aliases}):result;
+}
+
+function flmRiskSupabaseSources_(ctx,key){
+  const allowed=new Set(ctx.codes),batches=[];
+  for(const station of Object.keys(ctx.aliases).sort()){
+    const quoted=encodeURIComponent(JSON.stringify(station));
+    let batch=batches[batches.length-1];
+    if(!batch||batch.filter.length+quoted.length+1>1300){
+      batch={filter:'',stations:new Set()};
+      batches.push(batch);
+    }
+    if(quoted.length>1300)throw Error('RISK_SUMMARY_SCOPE');
+    batch.filter+=(batch.filter?',':'')+quoted;
+    batch.stations.add(station);
+  }
+  const deadline=Date.now()+35000,url=FLM_LOST_REST_URL.replace(/lost_orders$/,'at_risk_daily_summary');
+  const grain=['source','risk_day','station'];
+  const counts=['order_count','missing_cogs','hv_orders','aging_7','aging_14','aging_21','aging_over_21','missing_aging','missing_feedback'];
+  const metrics=grain.concat(counts,['known_cogs','hv_cogs']);
+  // Reserve the three initial reads per batch and share a bounded paging allowance.
+  let requests=batches.length*3+100;
+  function read(batch,source,range,fields,limit,accept){
+    const query='?select='+fields.join(',')+'&source=eq.'+source+'&station=in.('+batch.filter+')'+range+
+      '&order=risk_day.desc.nullslast,station.asc&limit='+limit;
+    let offset=0;
+    const seen=new Set();
+    for(let page=0;page<100&&requests-- >0&&Date.now()<deadline;page++){
+      const response=UrlFetchApp.fetch(url+query+'&offset='+offset,{
+        method:'get',headers:{apikey:key},followRedirects:false,muteHttpExceptions:true
+      });
+      if(Date.now()>=deadline||![200,206].includes(response.getResponseCode()))throw Error('RISK_SUMMARY_UPSTREAM');
+      const rows=JSON.parse(response.getContentText());
+      if(!Array.isArray(rows)||rows.length>limit)throw Error('RISK_SUMMARY_UPSTREAM');
+      if(!rows.length)return;
+      for(const row of rows){
+        if(!row||Object.keys(row).length!==fields.length||fields.some(field=>!Object.prototype.hasOwnProperty.call(row,field))||
+          row.source!==source||typeof row.station!=='string')throw Error('RISK_SUMMARY_UPSTREAM');
+        const code=Object.prototype.hasOwnProperty.call(ctx.aliases,row.station)?ctx.aliases[row.station]:null;
+        if(!batch.stations.has(row.station)||!allowed.has(code))continue;
+        const day=row.risk_day;
+        if(day!==null&&(typeof day!=='string'||day<'0001-01-01'||flmTeamDay_(day)!==day))throw Error('RISK_SUMMARY_UPSTREAM');
+        const group=JSON.stringify([day,row.station]);
+        if(seen.has(group))throw Error('RISK_SUMMARY_UPSTREAM');
+        seen.add(group);
+        if(accept(row,code))return;
+      }
+      offset+=rows.length;
+    }
+    throw Error('RISK_SUMMARY_UPSTREAM');
+  }
+  function sum(result,key,value,count=true){
+    const total=(result[key]||0)+value;
+    if(!Number.isFinite(total)||count&&!Number.isSafeInteger(total))throw Error('RISK_SUMMARY_UPSTREAM');
+    result[key]=total;
+  }
+  let latest=null;
+  for(const batch of batches)read(batch,'alert','&risk_day=not.is.null',grain,1,row=>{
+    if(!row.risk_day)throw Error('RISK_SUMMARY_UPSTREAM');
+    if(!latest||row.risk_day>latest)latest=row.risk_day;
+    return true;
+  });
+  return ['alert','urgent'].map(id=>{
+    const hubs=new Map(),dates=new Set();
+    let invalidDates=0;
+    const dated=id==='alert'?(latest?'risk_day.eq.'+latest:''):'risk_day.gte.'+ctx.anchor;
+    const range=dated?'&or=('+dated+',risk_day.is.null)':'&risk_day=is.null';
+    for(const batch of batches)read(batch,id,range,metrics,1000,(row,code)=>{
+      const n=row.order_count,day=row.risk_day;
+      if(counts.some(field=>!Number.isSafeInteger(row[field])||row[field]<0||row[field]>n)||n<1||
+        !Number.isFinite(row.known_cogs)||!Number.isFinite(row.hv_cogs)||row.hv_cogs<row.hv_orders*1000000||
+        (!row.hv_orders&&row.hv_cogs!==0)||row.hv_orders>n-row.missing_cogs||
+        row.aging_7+row.aging_14+row.aging_21+row.aging_over_21+row.missing_aging!==n||row.missing_feedback!==n)
+        throw Error('RISK_SUMMARY_UPSTREAM');
+      if(day===null){
+        invalidDates+=n;
+        if(!Number.isSafeInteger(invalidDates))throw Error('RISK_SUMMARY_UPSTREAM');
+        return;
+      }
+      if(id==='alert'?day!==latest:day<ctx.anchor)throw Error('RISK_SUMMARY_UPSTREAM');
+      dates.add(day);
+      const info=ctx.byCode[code]||{};
+      if(!hubs.has(code))hubs.set(code,{hubCode:code,station:info.hubName||info.stationName||code,n:0,knownCogs:0,missingCogs:0,
+        hvOrders:0,hvCogs:0,missingAging:0,missingFeedback:0,aging:{},stages:{},feedback:{}});
+      const h=hubs.get(code);
+      for(const [name,field] of Object.entries({n:'order_count',knownCogs:'known_cogs',missingCogs:'missing_cogs',hvOrders:'hv_orders',hvCogs:'hv_cogs',
+        missingAging:'missing_aging',missingFeedback:'missing_feedback'})){
+        sum(h,name,row[field],field!=='known_cogs'&&field!=='hv_cogs');
+      }
+      for(const [label,field] of Object.entries({'≤ 7 ngày':'aging_7','8–14 ngày':'aging_14','15–21 ngày':'aging_21','> 21 ngày':'aging_over_21','Chưa xác định':'missing_aging'})){
+        if(row[field])sum(h.aging,label,row[field]);
+      }
+    });
+    const hubRows=Array.from(hubs.values());
+    for(const h of hubRows){
+      if(h.missingCogs===h.n)h.hvOrders=h.hvCogs=null;
+    }
+    if(id==='alert'&&latest&&!hubs.size)throw Error('RISK_SUMMARY_UPSTREAM');
+    return {id:id,status:hubs.size?'OK':invalidDates?'UNAVAILABLE':'EMPTY',dates:Array.from(dates).sort(),hubRows:hubRows,invalidDates:invalidDates};
+  });
+}
+
+function flmRiskPivotDay_(value){
+  if(value instanceof Date)return flmLostSheetDay_(value);
+  if(typeof value==='number')return value>30000&&value<60000?new Date((Math.floor(value)-25569)*86400000).toISOString().slice(0,10):null;
+  const text=String(value||'').trim();
+  if(/^\d{1,2}([/-])\d{1,2}\1\d{4}$/.test(text))return flmLostSheetDay_(text);
+  const iso=/^(\d{4}-\d{2}-\d{2})(?:[T ](\d{2}):(\d{2})(?::(\d{2})(?:\.(\d+))?)?(Z|[+-]\d{2}(?::?\d{2})?)?)?$/i.exec(text);
+  if(!iso||+iso[2]>23||+iso[3]>59||+iso[4]>59)return null;
+  try{
+    const day=flmTeamDay_(iso[1]);
+    let zone=iso[6];
+    if(!zone)return day;
+    zone=zone.toUpperCase().replace(':','');
+    if(zone.length===3)zone+='00';
+    const hours=+zone.slice(1,3),minutes=+zone.slice(3);
+    if(zone!=='Z'&&(hours>14||minutes>59||(hours===14&&minutes>0)))return null;
+    const time=iso[2]+':'+iso[3]+':'+(iso[4]||'00')+'.'+(iso[5]||'').padEnd(3,'0').slice(0,3);
+    const stamp=Date.parse(day+'T'+time+zone);
+    return Number.isFinite(stamp)?flmTeamDay_(Utilities.formatDate(new Date(stamp),'Asia/Ho_Chi_Minh','yyyy-MM-dd')):null;
+  }catch(_){return null}
+}
+
+function flmRiskPivotSource_(sheets,id,names,ctx){
+  const result={id:id,status:'UNAVAILABLE',dates:[],hubRows:[]};
+  if(!sheets){result.status='ERROR';return result}
+  const candidates=[];
+  for(const sheet of sheets){
+    try{
+      const priority=names.indexOf(sheet.getName().trim().toLowerCase().replace(/[\s-]+/g,'_'));
+      if(priority>=0)candidates.push({sheet,priority});
+    }catch(_){result.status='ERROR'}
+  }
+  candidates.sort((a,b)=>a.priority-b.priority);
+  candidate: for(const {sheet} of candidates){
+    try{
+      const lastRow=sheet.getLastRow(),lastColumn=sheet.getLastColumn();
+      if(lastRow<1||lastRow>FLM_TEAM_CFG.maxRows||lastColumn>80)continue;
+      const values=sheet.getRange(1,1,lastRow,lastColumn).getValues();
+      const keys=values[0].map(h=>String(h||'').trim().normalize('NFC').toLowerCase().replace(/\s+/g,'_'));
+      const col=(...aliases)=>aliases.reduce((match,name)=>match>=0?match:keys.indexOf(name),-1);
+      const date=id==='urgent'?col('deadline','date','claim_date','ngày'):col('date','claim_date','ngày');
+      const station=col('fleet_final_station','station','hub','trạm','hub_code');
+      const orders=col('orders','count','records','số_lượng','qty','sl','count_of_spx_tracking','counta_of_spx_tracking','count_of_id','counta_of_id',
+        'count_of_spx_shipment_id','counta_of_spx_shipment_id','count_of_shipment_id','counta_of_shipment_id');
+      const cogs=col('cogs','sum_of_cogs','sum_cogs','total_cogs','amount','amt','tổng_cogs');
+      const aging=col('group_aging','aging','tuổi');
+      const stage=col('stage','fleet_final_status','status');
+      const feedback=col('feedback','phản_hồi');
+      const hv=col('hv','high_value');
+      const hvOrders=col('hv_orders','hv_count','high_value_orders','high_value_count','đơn_hv');
+      const hvCogs=col('hv_cogs','cogs_hv','high_value_cogs','cogs_đơn_hv');
+      if(date<0||station<0||orders<0)continue;
+      const allowed=new Set(ctx.codes),hubs=new Map(),dates=new Set();
+      const add=(bucket,label,count)=>{if(label)bucket[label]=(bucket[label]||0)+count};
+      const label=value=>String(value==null?'':value).trim().slice(0,120);
+      const scoped=[];
+      let alertDay=null;
+      for(let i=1;i<values.length;i++){
+        const row=values[i],day=flmRiskPivotDay_(row[date]);
+        if(!day||id==='urgent'&&day<ctx.anchor)continue;
+        const code=flmLostHubCode_(row[station],ctx.masterAliases);
+        if(!allowed.has(code))continue;
+        const n=flmTeamNum_(String(row[orders]??'').trim());
+        scoped.push({row,day,code,n});
+        if(id==='alert'&&Number.isSafeInteger(n)&&n>0&&(!alertDay||day>alertDay))alertDay=day;
+      }
+      for(const {row,day,code,n} of scoped){
+        if(alertDay&&day!==alertDay)continue;
+        if(!Number.isSafeInteger(n)||n<0)continue candidate;
+        if(n===0)continue;
+        const money=cogs<0?null:flmTeamNum_(label(row[cogs]));
+        const info=ctx.byCode[code]||{};
+        if(!hubs.has(code))hubs.set(code,{hubCode:code,station:info.hubName||info.stationName||code,n:0,knownCogs:0,missingCogs:0,aging:Object.create(null),stages:Object.create(null),feedback:Object.create(null),hvOrders:0,hvCogs:0});
+        const h=hubs.get(code);
+        h.n+=n;
+        if(money==null)h.missingCogs+=n;
+        else h.knownCogs+=money;
+        const age=aging<0?'':label(row[aging]),ageDays=flmTeamNum_(age);
+        add(h.aging,ageDays==null?age:ageDays<=7?'≤ 7 ngày':ageDays<=14?'8–14 ngày':ageDays<=21?'15–21 ngày':'> 21 ngày',n);
+        const stageLabel=label(row[stage]);
+        add(h.stages,stageLabel,n);
+        const flag=label(row[hv]).toLowerCase();
+        const flaggedCount=/^(true|1|hv)$/.test(flag)?n:/^(false|0|non[-_ ]hv)$/.test(flag)?0:null;
+        const countCell=label(row[hvOrders]),explicitCount=flmTeamNum_(countCell);
+        const countValid=Number.isSafeInteger(explicitCount)&&explicitCount>=0&&explicitCount<=n&&
+          (flaggedCount==null||explicitCount===flaggedCount);
+        const count=countCell?(countValid?explicitCount:null):flaggedCount;
+        const amountCell=label(row[hvCogs]);
+        let amount=flmTeamNum_(amountCell);
+        if(!amountCell&&count===0)amount=0;
+        if(!amountCell&&count===n)amount=money;
+        const fitsCount=amount===0?count==null||count===0:count!==0&&amount>=(count??1)*1000000;
+        const amountValid=amount!=null&&fitsCount&&(!countCell||countValid)&&
+          (amount===0||money==null||amount<=money)&&(count!==n||money==null||amount===money);
+        const conflicts=count!=null&&money!=null&&money>=0&&(
+          money<count*1000000||count===0&&money>=n*1000000||
+          amountValid&&count<n&&money-amount>=(n-count)*1000000);
+        h.hvOrders=h.hvOrders==null||count==null||conflicts?null:h.hvOrders+count;
+        h.hvCogs=h.hvCogs==null||!amountValid||conflicts?null:h.hvCogs+amount;
+        const reply=feedback<0?'':label(row[feedback]).toLowerCase();
+        if(reply)add(h.feedback,/^(pending|chưa phản hồi|chưa có feedback)$/.test(reply)?'Chưa phản hồi':/^(done|responded|đã phản hồi)$/.test(reply)?'Đã phản hồi':'Khác',n);
+        dates.add(day);
+      }
+      result.status=hubs.size?'OK':'EMPTY';
+      result.dates=Array.from(dates).sort();
+      result.hubRows=Array.from(hubs.values());
+      break;
+    }catch(_){result.status='ERROR'}
+  }
+  return result;
+}
+
+
 function flmTeamGetClaims(request){
   const ctx=flmTeamContext_('compensated',request);
   ctx.force=request&&request.force===true;
   ctx.tab=request&&request.tab;
-  const tabKey=ctx.tab||'all';
+  const tabKey=!ctx.tab?'all-with-lost:v2':ctx.tab==='lost'||ctx.tab==='all'?ctx.tab+':v2':ctx.tab;
   const data=flmTeamFast_('claims:'+tabKey,ctx,ctx.force,()=>flmTeamReadClaims_(ctx,request));
   return ctx.access.customAccess&&!(ctx.access.allowedPages||[]).includes('compensated')?Object.assign({},data,{claims:{status:'ACCESS_DENIED'}}):data;
 }
@@ -356,20 +848,27 @@ function flmTeamReadClaims_(ctx,request){
   }
   if(!tab||tab==='lost'){
     part('lost',()=>{
+      if(request&&request.source==='supabase'){
+        let fromSupabase=null;
+        try{fromSupabase=flmTeamLostFromSupabase_(ctx,ss);}catch(_){}
+        if(fromSupabase)return fromSupabase;
+      }
       let fromSheet=null;
       try{fromSheet=flmTeamLostFromSheet_(ctx,ss);}catch(_){}
       if(fromSheet)return fromSheet;
+      let fromSupabase=null;
+      try{fromSupabase=flmTeamLostFromSupabase_(ctx,ss);}catch(_){}
+      if(fromSupabase)return fromSupabase;
       try{
         const meta=flmTeamMetadata_('flm_lost_current',['d','station','mapped','amt','reason','shipment_id','ingested_at']);
         out.sources.push(meta);
-        return flmTeamCached_('lost',ctx,[meta],request&&request.force===true,()=>{
+        return flmTeamCached_('lost:v2',ctx,[meta],request&&request.force===true,()=>{
           const data=flmTeamQuery_('WITH scoped AS (SELECT *,COUNT(*) OVER(PARTITION BY d,station,shipment_id) AS duplicate_count FROM '+flmTeamTable_('flm_lost_current')+' WHERE mapped AND d BETWEEN LEAST(@from,DATE_TRUNC(@closing,MONTH)) AND @closing AND '+flmTeamStationSql_('station')+') SELECT TO_JSON_STRING(t) FROM (SELECT d,station,reason,COUNT(*) AS n,SUM(amt) AS amount,COUNTIF(amt IS NULL) AS missing_amount,MAX(ingested_at) AS ingested_at,MAX(duplicate_count) AS max_duplicate FROM scoped GROUP BY d,station,reason) t',ctx);
-          const masterMap=flmMasterHubMap_();
-          const lossRates=flmReadLossRateMaster_(ss,ctx.closing,masterMap);
+          const lossRates=flmReadLossRateMaster_(ss,ctx.closing,ctx.masterAliases);
           return flmTeamLostBuild_(data,ctx,lossRates);
         });
       }catch(_){}
-      throw Error('Không tìm thấy dữ liệu Lost từ Google Sheet ('+flmTeamLostDbSheetId_()+'). Kiểm tra tab LOST.');
+      throw Error('Không tìm thấy dữ liệu Lost. Kiểm tra nguồn LOST.');
     });
   }
   out.limitations=['Công nợ và bồi thường đã thanh toán chưa có nguồn hợp lệ. Trang hiển thị COGS có rủi ro và Lost ghi nhận từ Google Sheet.'];
@@ -412,14 +911,15 @@ function flmTeamLostBuild_(rows,ctx,lossRates){
   const allowed=new Set((ctx.codes||[]).map(String));
   rows.forEach(r=>{
     // Deduplicated in reader; no throw
-    const code=r.hubCode||flmMatchHubCode_(r.station,ctx);if(!code||!allowed.has(String(code)))return;
+    const code=flmLostHubCode_(r.station,ctx.aliases);
+    if(!allowed.has(code)||r.hubCode!=null&&String(r.hubCode)!==code)return;
     const date=flmTeamDay_(r.d),n=Number(r.n),amount=flmTeamNum_(r.amount),missing=Number(r.missing_amount||0);
     if(!Number.isSafeInteger(n)||n<1||!Number.isSafeInteger(missing)||missing<0||missing>n||amount==null&&missing<n)throw Error('FLM_LOST_AGGREGATE_INVALID');
     if(date>ctx.closing||date<(month<ctx.from?month:ctx.from))throw Error('FLM_LOST_DATE_MISMATCH');
     if(!dataAsOf||date>dataAsOf)dataAsOf=date;if(!ingestedAt||r.ingested_at>ingestedAt)ingestedAt=r.ingested_at;
     function add(o){o.n+=n;o.knownAmount+=amount||0;o.missingAmount+=missing}
     Object.keys(periods).forEach(key=>{const p=periods[key];if(date<p.from)return;add(p.total);
-      const info=ctx.byCode[code]||{},reason=String(r.reason||'Chưa ghi lý do');
+      const info=ctx.byCode[code]||{},reason=flmLostReasonBucket_(r.reason);
       add(p.hubs[code]||(p.hubs[code]=Object.assign(empty(),{hubCode:code,station:info.hubName||code})));
       add(p.days[date]||(p.days[date]=Object.assign(empty(),{date:date})));
       add(p.reasons[reason]||(p.reasons[reason]=Object.assign(empty(),{reason:reason})));
@@ -427,7 +927,7 @@ function flmTeamLostBuild_(rows,ctx,lossRates){
   });
   Object.keys(periods).forEach(key=>{const p=periods[key];[p.total].concat(Object.values(p.hubs),Object.values(p.days),Object.values(p.reasons)).forEach(o=>o.amount=o.missingAmount?null:o.knownAmount);
     Object.values(p.hubs).forEach(h=>{
-      const rateInfo=(lossRates&&(lossRates[h.hubCode]||lossRates[h.station]||lossRates[flmTeamAlias_(h.station)]))||null;
+      const rateInfo=lossRates&&lossRates[h.hubCode];
       h.lossRate=rateInfo?rateInfo.formatted:'—';
       h.lossRateNum=rateInfo?rateInfo.num:null;
     });
@@ -441,7 +941,51 @@ function flmTeamLostDbSheetId_(){
   const p=typeof PropertiesService!=='undefined'?PropertiesService.getScriptProperties():null;
   return (p&&p.getProperty('LOST_DB_SHEET_ID'))||'1jjQNjOu-kovQ9IYWffhi-76yQZwqgG67YJ2M86jcpvs';
 }
-function flmReadLostSheetMaster_(ss,closing,from,masterMap){
+
+function flmLostSheetKeys_(headers){
+  const columns=headers.map(header=>String(header||'').trim().toLowerCase().replace(/\s+/g,'_'));
+  return {
+    date:columns.findIndex(h=>['d','report_date','date','claim_date','ngay_chot','ngày_chốt','ngày','ngay'].includes(h)),
+    station:columns.findIndex(h=>['station','station_name','hub','hub_name','hub_code','fleet_final_station','trạm','tram','tên_hub','mã_hub'].includes(h))
+  };
+}
+
+function flmLostSheetDay_(raw){
+  let day='';
+  if(raw instanceof Date)day=Utilities.formatDate(raw,'Asia/Ho_Chi_Minh','yyyy-MM-dd');
+  else if(typeof raw==='number'&&raw>30000&&raw<60000)day=Utilities.formatDate(new Date(Math.round((raw-25569)*86400000)),'Asia/Ho_Chi_Minh','yyyy-MM-dd');
+  else{
+    const value=String(raw||'').trim(),iso=/^(\d{4}-\d{2}-\d{2})(?:$|[T\s])/.exec(value);
+    const local=/^(\d{1,2})[\/-](\d{1,2})[\/-](\d{4})(?:$|\s)/.exec(value);
+    if(iso)day=iso[1];
+    else if(local)day=local[3]+'-'+local[2].padStart(2,'0')+'-'+local[1].padStart(2,'0');
+  }
+  try{return flmTeamDay_(day);}catch(_){return null;}
+}
+
+function flmLostSheetStats_(sheet,ctx,from){
+  const length=sheet.getLastRow()-1,width=sheet.getLastColumn();
+  if(length<0||width<1)return null;
+  const keys=flmLostSheetKeys_(sheet.getRange(1,1,1,width).getValues()[0]);
+  if(keys.date<0||keys.station<0)return null;
+  if(length===0)return {dates:[],latestDate:null,rows:0,reportingHubs:0};
+  const dates=sheet.getRange(2,keys.date+1,length,1).getValues(),stations=sheet.getRange(2,keys.station+1,length,1).getValues();
+  if(dates.length!==length||stations.length!==length)return null;
+  const found=new Set(),hubs=new Set();
+  let latestDate=null,rows=0;
+  dates.forEach(([raw],i)=>{
+    const code=flmLostHubCode_(stations[i][0],ctx.aliases);
+    if(!code)return;
+    const date=flmLostSheetDay_(raw);
+    if(!date||date<from||date>ctx.closing)return;
+    found.add(date);
+    if(!latestDate||date>latestDate){latestDate=date;rows=0;hubs.clear();}
+    if(date===latestDate){rows++;hubs.add(code);}
+  });
+  return {dates:Array.from(found).sort(),latestDate:latestDate,rows:rows,reportingHubs:hubs.size};
+}
+
+function flmReadLostSheetMaster_(ss,closing,from,aliases){
   const monthStart=closing.slice(0,7)+"-01",minDate=monthStart<from?monthStart:from;
   const pivotSheet=ss.getSheetByName("LOST_PIVOT")||ss.getSheetByName("LOST_AGG")||ss.getSheetByName("LOST_SUMMARY")||flmFindSheetByKeyword_(ss,["lost_pivot","lost pivot","lost_summary","lost_agg"]);
   if(pivotSheet&&pivotSheet.getLastRow()>1){
@@ -449,32 +993,24 @@ function flmReadLostSheetMaster_(ss,closing,from,masterMap){
     if(pAll.length>1){
       const pHeaders=pAll[0].map(h=>String(h||"").trim().toLowerCase());
       const findPCol=(kws,def)=>{const idx=pHeaders.findIndex(h=>kws.some(kw=>h.indexOf(kw)>=0));return idx>=0?idx:def};
-      const cDate=findPCol(["report_date","date","ngày"],0),cStation=findPCol(["station","hub","trạm"],1),cReason=findPCol(["reason","lý do"],2),cN=findPCol(["records","count","số lượng","qty","orders"],3),cAmt=findPCol(["amount","cogs","amt","tiền","sum"],4);
-      const grouped={};
-      for(let i=1;i<pAll.length;i++){
-        const row=pAll[i];
-        const rawDate=row[cDate];let d="";
-        if(rawDate instanceof Date)d=Utilities.formatDate(rawDate,"Asia/Ho_Chi_Minh","yyyy-MM-dd");
-        else if(typeof rawDate==="number"&&rawDate>30000&&rawDate<60000){
-          d=Utilities.formatDate(new Date(Math.round((rawDate-25569)*86400*1000)),"Asia/Ho_Chi_Minh","yyyy-MM-dd");
-        }else{
-          const s=String(rawDate||"").trim();
-          if(/^\d{4}-\d{2}-\d{2}/.test(s))d=s.slice(0,10);
-          else{
-            const m=/^(\d{1,2})[\/\-](\d{1,2})[\/\-](\d{4})/.exec(s);
-            if(m)d=m[3]+"-"+m[2].padStart(2,"0")+"-"+m[1].padStart(2,"0");
-          }
+      const {date:cDate,station:cStation}=flmLostSheetKeys_(pHeaders);
+      if(cDate>=0&&cStation>=0){
+        const cReason=findPCol(["reason","lý do"],2),cN=findPCol(["records","count","số lượng","qty","orders"],3),cAmt=findPCol(["amount","cogs","amt","tiền","sum"],4);
+        const grouped={};
+        for(let i=1;i<pAll.length;i++){
+          const row=pAll[i],d=flmLostSheetDay_(row[cDate]);
+          if(!d||d<minDate||d>closing)continue;
+          const stationRaw=String(row[cStation]||"").trim(),code=flmLostHubCode_(stationRaw,aliases);
+          if(!code)continue;
+          const reason=cReason>=0&&row[cReason]?String(row[cReason]):"Chưa ghi lý do";
+          const n=cN>=0?Number(row[cN])||0:1,amt=cAmt>=0?flmTeamNum_(row[cAmt])||0:0;
+          if(!Number.isSafeInteger(n)||n<1)continue;
+          const groupKey=JSON.stringify([d,stationRaw,reason]);
+          if(!grouped[groupKey])grouped[groupKey]={d:d,hubCode:code,station:stationRaw,reason:reason,n:0,amount:0,missing_amount:0,ingested_at:d+"T23:00:00+07:00",max_duplicate:1};
+          grouped[groupKey].n+=n;grouped[groupKey].amount+=amt;
         }
-        if(!d||d<minDate||d>closing)continue;
-        const stationRaw=String(row[cStation]||"").trim(),code=flmMatchHubCode_(stationRaw,masterMap);
-        if(!code)continue;
-        const reason=cReason>=0&&row[cReason]?String(row[cReason]):"Chưa ghi lý do";
-        const n=cN>=0?Number(row[cN])||0:1,amt=cAmt>=0?flmTeamNum_(row[cAmt])||0:0;
-        const groupKey=d+"|"+stationRaw+"|"+reason;
-        if(!grouped[groupKey])grouped[groupKey]={d:d,hubCode:code,station:stationRaw,reason:reason,n:0,amount:0,missing_amount:0,ingested_at:d+"T23:00:00+07:00",max_duplicate:1};
-        grouped[groupKey].n+=n;grouped[groupKey].amount+=amt;
+        return Object.values(grouped);
       }
-      return Object.values(grouped);
     }
   }
   const sheet=ss.getSheetByName("LOST");
@@ -482,8 +1018,7 @@ function flmReadLostSheetMaster_(ss,closing,from,masterMap){
   const lastCol=Math.min(sheet.getLastColumn(),15);
   const headers=sheet.getRange(1,1,1,lastCol).getValues()[0].map(h=>String(h||"").trim().toLowerCase());
   const findCol=(kws,def)=>{const idx=headers.findIndex(h=>kws.some(kw=>h.indexOf(kw)>=0));return idx>=0?idx:def};
-  const colDate=findCol(["report_date","date","ngày","ngay"],0);
-  const colStation=findCol(["station","hub","trạm","tram","fleet_final_station"],1);
+  const {date:colDate,station:colStation}=flmLostSheetKeys_(headers);
   const colAmt=findCol(["amount","cogs","amt","tiền","tien"],10);
   const colReason=findCol(["reason","lý do","ly do"],6);
   const colShipment=findCol(["shipment","tracking","đơn","don"],5);
@@ -496,21 +1031,9 @@ function flmReadLostSheetMaster_(ss,closing,from,masterMap){
     const chunkValues=sheet.getRange(2,1,lastRow-1,numCols).getValues();
     for(let i=0;i<chunkValues.length;i++){
       const row=chunkValues[i];
-      const rawDate=row[colDate];let d="";
-      if(rawDate instanceof Date)d=Utilities.formatDate(rawDate,"Asia/Ho_Chi_Minh","yyyy-MM-dd");
-      else if(typeof rawDate==="number"&&rawDate>30000&&rawDate<60000){
-        d=Utilities.formatDate(new Date(Math.round((rawDate-25569)*86400*1000)),"Asia/Ho_Chi_Minh","yyyy-MM-dd");
-      }else{
-        const s=String(rawDate||"").trim();
-        if(/^\d{4}-\d{2}-\d{2}/.test(s))d=s.slice(0,10);
-        else{
-          const m=/^(\d{1,2})[\/\-](\d{1,2})[\/\-](\d{4})/.exec(s);
-          if(m)d=m[3]+"-"+m[2].padStart(2,"0")+"-"+m[1].padStart(2,"0");
-        }
-      }
-      if(d&&d<minDate){hasOlderThanMin=true;continue;}
-      if(!d||d>closing)continue;
-      const stationRaw=String(row[colStation]||"").trim(),code=flmMatchHubCode_(stationRaw,masterMap);
+      const d=flmLostSheetDay_(row[colDate]);
+      if(!d||d<minDate||d>closing)continue;
+      const stationRaw=String(row[colStation]||"").trim(),code=flmLostHubCode_(stationRaw,aliases);
       if(!code)continue;
       const shipId=colShipment>=0?String(row[colShipment]||"").trim():"";
       if(shipId&&shipId!=="-"&&shipId.toLowerCase()!=="n/a"&&shipId!=="0"){
@@ -520,7 +1043,7 @@ function flmReadLostSheetMaster_(ss,closing,from,masterMap){
       }
       const reason=colReason>=0&&row[colReason]?String(row[colReason]):"Chưa ghi lý do";
       const amt=colAmt>=0?flmTeamNum_(row[colAmt]):null,isMissing=amt==null;
-      const groupKey=d+"|"+stationRaw+"|"+reason;
+      const groupKey=JSON.stringify([d,stationRaw,reason]);
       if(!grouped[groupKey])grouped[groupKey]={d:d,hubCode:code,station:stationRaw,reason:reason,n:0,amount:0,missing_amount:0,ingested_at:d+"T23:00:00+07:00",max_duplicate:1};
       const g=grouped[groupKey];g.n++;if(isMissing)g.missing_amount++;else g.amount+=(amt||0);
     }
@@ -528,7 +1051,7 @@ function flmReadLostSheetMaster_(ss,closing,from,masterMap){
   return Object.values(grouped);
 }
 function flmTeamLostFromSheet_(ctx,ssOptional){
-  const masterKey="flm:lost-master-rows:v3:"+ctx.closing+":"+ctx.from;
+  const masterKey=flmLostMasterKey_(ctx);
   let masterRows=null;
   if(!ctx.force)masterRows=flmCacheGet_(masterKey);
   let ss=ssOptional;
@@ -536,16 +1059,96 @@ function flmTeamLostFromSheet_(ctx,ssOptional){
     if(typeof SpreadsheetApp==="undefined")return null;
     if(!ss){try{ss=SpreadsheetApp.openById(flmTeamLostDbSheetId_())}catch(_){return null}}
     if(!ss)return null;
-    const masterMap=flmMasterHubMap_();
-    masterRows=flmReadLostSheetMaster_(ss,ctx.closing,ctx.from,masterMap);
+    masterRows=flmReadLostSheetMaster_(ss,ctx.closing,ctx.from,ctx.masterAliases);
     if(masterRows&&masterRows.length)flmCachePut_(masterKey,masterRows,21600);
   }
   if(!masterRows||!masterRows.length)return null;
   if(!ss&&typeof SpreadsheetApp!=="undefined"){try{ss=SpreadsheetApp.openById(flmTeamLostDbSheetId_())}catch(_){} }
-  const masterMap=flmMasterHubMap_();
-  const lossRates=flmReadLossRateMaster_(ss,ctx.closing,masterMap);
+  const lossRates=flmReadLossRateMaster_(ss,ctx.closing,ctx.masterAliases);
   return flmTeamLostBuild_(masterRows,ctx,lossRates);
 }
+
+function flmTeamLostFromSupabase_(ctx,ssOptional){
+  const props=typeof PropertiesService!=='undefined'?PropertiesService.getScriptProperties():null;
+  if(!props)return null;
+  let key=null;
+  try{key=props.getProperty('SUPABASE_LOST_SECRET_KEY');}catch(_){}
+  if(!key){
+    try{key=props.getProperty('D0_SUPABASE_SECRET_KEY');}catch(_){}
+  }
+  if(!key){
+    try{key=props.getProperty('SUPABASE_KEY');}catch(_){}
+  }
+  if(typeof key!=='string'||(!/^sb_secret_[A-Za-z0-9_-]+$/.test(key)&&!/^sb_publishable_[A-Za-z0-9_-]+$/.test(key)&&!key.startsWith('eyJ')))return null;
+  const base=typeof FLM_LOST_REST_URL==='string'?FLM_LOST_REST_URL.replace(/\/lost_orders$/,''):'https://aqvcybxcfgicxmzpczgd.supabase.co/rest/v1';
+  const month=ctx.closing.slice(0,7)+'-01',minDate=month<ctx.from?month:ctx.from;
+  const cacheKey='flm:lost-sb-pivot:v2:'+getSecurityVersion_()+':'+ctx.closing+':'+minDate;
+  let rows=!ctx.force?flmCacheGet_(cacheKey):null;
+  if(!rows||!rows.length){
+    try{
+      const allRows=[];
+      const limit=1000;
+      for(let offset=0;offset<5000;offset+=limit){
+        const targetUrl=base+'/lost_daily_pivot?ngay_chot=gte.'+encodeURIComponent(minDate)+
+          '&ngay_chot=lte.'+encodeURIComponent(ctx.closing)+
+          '&select=ngay_chot,hub,khu_vuc,tong_so_don,tong_tien_den_bu,don_mat_tai_hub,lam_mat_boi_rider,rider_pick_chua_ban_giao,xa_tai_thieu,ly_do_khac,thoi_diem_cap_nhat'+
+          '&order=ngay_chot.desc&limit='+limit+'&offset='+offset;
+        const res=UrlFetchApp.fetch(targetUrl,{
+          method:'get',
+          headers:{apikey:key,Authorization:'Bearer '+key},
+          followRedirects:false,
+          muteHttpExceptions:true
+        });
+        if(res.getResponseCode()!==200)break;
+        const batch=JSON.parse(res.getContentText());
+        if(!Array.isArray(batch)||!batch.length)break;
+        allRows.push(...batch);
+        if(batch.length<limit)break;
+      }
+      if(!allRows.length)return null;
+      rows=[];
+      allRows.forEach(r=>{
+        const totalN=Number(r.tong_so_don||0);
+        if(!totalN)return;
+        const date=String(r.ngay_chot||'').trim();
+        if(!date||date<minDate||date>ctx.closing)return;
+        const totalAmt=Math.max(0,Number(r.tong_tien_den_bu||0));
+        const station=r.hub,updated=r.thoi_diem_cap_nhat||date+'T23:00:00+07:00';
+        const reasons=[
+          {reason:'Đơn hàng mất tại Hub',n:Number(r.don_mat_tai_hub||0)},
+          {reason:'Đơn hàng làm mất bởi Rider',n:Number(r.lam_mat_boi_rider||0)},
+          {reason:'Đơn hàng rider Pick chưa bàn giao tại hub',n:Number(r.rider_pick_chua_ban_giao||0)},
+          {reason:'Đền bù D0',n:Number(r.xa_tai_thieu||0)},
+          {reason:'Lý do khác',n:Number(r.ly_do_khac||0)}
+        ].filter(x=>x.n>0);
+        const sumN=reasons.reduce((s,x)=>s+x.n,0);
+        if(sumN<totalN){
+          reasons.push({reason:'Lý do khác',n:totalN-sumN});
+        }
+        if(!reasons.length){
+          rows.push({d:date,station:station,reason:'Chưa ghi lý do',n:totalN,amount:totalAmt,missing_amount:0,ingested_at:updated});
+        }else{
+          let allocatedAmt=0;
+          reasons.forEach((item,idx)=>{
+            const itemAmt=Math.max(0,(idx===reasons.length-1)?(totalAmt-allocatedAmt):Math.round(totalAmt*item.n/totalN));
+            allocatedAmt+=itemAmt;
+            rows.push({d:date,station:station,reason:item.reason,n:item.n,amount:itemAmt,missing_amount:0,ingested_at:updated});
+          });
+        }
+      });
+      if(rows.length)flmCachePut_(cacheKey,rows,21600);
+    }catch(_){return null;}
+  }
+  if(!rows||!rows.length)return null;
+  let ss=ssOptional;
+  if(!ss&&typeof SpreadsheetApp!=='undefined'){
+    try{ss=SpreadsheetApp.openById(flmTeamLostDbSheetId_());}catch(_){}
+  }
+  const lossRates=flmReadLossRateMaster_(ss,ctx.closing,ctx.masterAliases);
+  return flmTeamLostBuild_(rows,ctx,lossRates);
+}
+
+function flmLostMasterKey_(ctx){return 'flm:lost-master-rows:v4:'+getSecurityVersion_()+':'+ctx.closing+':'+ctx.from}
 
 function flmFormatMonthHeader_(cell){
   if(!cell)return '';
@@ -571,7 +1174,7 @@ function flmFormatMonthHeader_(cell){
   return '';
 }
 
-function flmParseLossRateRows_(values,closing,masterMap){
+function flmParseLossRateRows_(values,closing,aliases){
   if(!values||values.length<=1)return {};
   const targetMonth=(closing||'').slice(0,7)||'2026-11';
   let monthCols={},monthList=[],headerRowIdx=-1;
@@ -594,6 +1197,8 @@ function flmParseLossRateRows_(values,closing,masterMap){
     const row=values[r];
     const stationRaw=String(row[0]||'').trim();
     if(!stationRaw||/^\d{4}-\d{2}$/.test(stationRaw))continue;
+    const code=flmLostHubCode_(stationRaw,aliases);
+    if(!code)continue;
     let val=row[chosenCol];
     if((val==null||String(val).trim()==='')&&monthList.length>0){
       for(let i=0;i<monthList.length;i++){
@@ -621,21 +1226,14 @@ function flmParseLossRateRows_(values,closing,masterMap){
         }
       }
     }
-    const info={formatted:formatted,num:num,station:stationRaw};
-    result[stationRaw]=info;
-    const alias=flmTeamAlias_(stationRaw);
-    result[alias]=info;
-    if(masterMap){
-      const code=flmMatchHubCode_(stationRaw,masterMap);
-      if(code)result[code]=info;
-    }
+    result[code]={formatted:formatted,num:num,station:stationRaw};
   }
   return result;
 }
 
-function flmReadLossRateMaster_(ss,closing,masterMap){
+function flmReadLossRateMaster_(ss,closing,aliases){
   const targetMonth=(closing||'').slice(0,7)||'2026-11';
-  const cacheKey='flm:loss-rate:v3:'+targetMonth;
+  const cacheKey='flm:loss-rate:v4:'+getSecurityVersion_()+':'+targetMonth;
   const cached=flmCacheGet_(cacheKey);
   if(cached&&Object.keys(cached).length>=10)return cached;
   let values=null;
@@ -647,11 +1245,11 @@ function flmReadLossRateMaster_(ss,closing,masterMap){
   }
   let result=null;
   if(values&&values.length>1){
-    try{result=flmParseLossRateRows_(values,closing,masterMap);}catch(_){}
+    try{result=flmParseLossRateRows_(values,closing,aliases);}catch(_){}
   }
   if(!result||Object.keys(result).length<10){
     const fbValues=flmGetFallbackLossRateValues_();
-    const fbResult=flmParseLossRateRows_(fbValues,closing,masterMap);
+    const fbResult=flmParseLossRateRows_(fbValues,closing,aliases);
     result=Object.assign({},fbResult,result||{});
   }
   if(result&&Object.keys(result).length)flmCachePut_(cacheKey,result,21600);
@@ -1013,8 +1611,9 @@ function flmTeamGetHubOrders(request){
   const info=ctx.byCode[hubCode]||{};
   const stationName=info.hubName||info.stationName||hubCode;
   const masterMap=flmMasterHubMap_();
-  
-  const cacheKey='flm:hub-orders:v2:'+ctx.anchor+':'+hubCode;
+  const allowLost=flmLostAllowsDetails_(ctx.access)&&(!ctx.access.customAccess||(ctx.access.allowedPages||[]).includes('compensated'));
+
+  const cacheKey=allowLost?'flm:hub-orders:v6:'+getSecurityVersion_()+':'+ctx.anchor+':'+hubCode:'flm:hub-orders:v3:'+ctx.anchor+':'+hubCode+':false';
   if(!r.force){
     const cached=flmCacheGet_(cacheKey);
     if(cached)return cached;
@@ -1026,50 +1625,50 @@ function flmTeamGetHubOrders(request){
   const lostList=[];
   const urgentList=[];
   const alertList=[];
+  let supabaseLostComplete=false,lostComplete=false;
+  if(allowLost){
+    try{
+      const scopedLost=flmLostSupabaseHubOrders_(ctx,hubCode);
+      lostList.push(...scopedLost);
+      supabaseLostComplete=lostComplete=true;
+    }catch(_){}
+  }
   
   if(ss){
-    try{
-      const lostSheet=ss.getSheetByName('LOST')||flmFindSheetByKeyword_(ss,['lost','mất']);
-      if(lostSheet&&lostSheet.getLastRow()>1){
+    if(allowLost&&!supabaseLostComplete)try{
+      const lostSheet=ss.getSheetByName('LOST');
+      if(lostSheet&&lostSheet.getLastRow()>0&&lostSheet.getLastColumn()>0){
         const lastCol=Math.min(lostSheet.getLastColumn(),15);
         const headers=lostSheet.getRange(1,1,1,lastCol).getValues()[0].map(h=>String(h||'').trim().toLowerCase());
         const findCol=(kws,def)=>{const idx=headers.findIndex(h=>kws.some(kw=>h.indexOf(kw)>=0));return idx>=0?idx:def};
-        const cDate=findCol(['report_date','date','ngày','ngay'],0);
-        const cStation=findCol(['station','hub','trạm','tram','fleet_final_station'],1);
+        const {date:cDate,station:cStation}=flmLostSheetKeys_(headers);
         const cAmt=findCol(['amount','cogs','amt','tiền','tien'],10);
         const cReason=findCol(['reason','lý do','ly do'],6);
-        const cShip=findCol(['shipment','tracking','đơn','don','spx_shipment_id','shipment_id'],5);
+        const cShip=findCol(['shipment_id','spx_tracking','shipment','tracking','mã đơn','ma_don'],-1);
         
         const lastRow=lostSheet.getLastRow();
         const numCols=Math.max(cDate,cStation,cAmt,cReason,cShip)+1;
         const monthStart=ctx.closing.slice(0,7)+'-01',minDate=monthStart<ctx.from?monthStart:ctx.from;
         
-        if(lastRow>=2){
-          const chunkValues=lostSheet.getRange(2,1,lastRow-1,numCols).getValues();
+        if(cDate>=0&&cStation>=0&&cShip>=0){
+          const chunkValues=lastRow===1?[]:lostSheet.getRange(2,1,lastRow-1,numCols).getValues();
+          if(chunkValues.length!==lastRow-1)throw Error('LOST_UPSTREAM');
+          const fallbackRows=[];
           for(let i=0;i<chunkValues.length;i++){
             const row=chunkValues[i];
-            const rawDate=row[cDate];let d='';
-            if(rawDate instanceof Date)d=Utilities.formatDate(rawDate,'Asia/Ho_Chi_Minh','yyyy-MM-dd');
-            else if(typeof rawDate==='number'&&rawDate>30000&&rawDate<60000){
-              d=Utilities.formatDate(new Date(Math.round((rawDate-25569)*86400*1000)),'Asia/Ho_Chi_Minh','yyyy-MM-dd');
-            }else{
-              const s=String(rawDate||'').trim();
-              if(/^\d{4}-\d{2}-\d{2}/.test(s))d=s.slice(0,10);
-              else{
-                const m=/^(\d{1,2})[\/\-](\d{1,2})[\/\-](\d{4})/.exec(s);
-                if(m)d=m[3]+'-'+m[2].padStart(2,'0')+'-'+m[1].padStart(2,'0');
-              }
-            }
+            const d=flmLostSheetDay_(row[cDate]);
             if(!d||d<minDate||d>ctx.closing)continue;
             const stationRaw=String(row[cStation]||'').trim();
-            const code=flmMatchHubCode_(stationRaw,masterMap);
+            const code=flmLostHubCode_(stationRaw,ctx.aliases);
             if(code!==hubCode)continue;
-            const shipId=cShip>=0?String(row[cShip]||'').trim():'—';
+            const shipId=String(row[cShip]||'').trim()||'—';
             const reason=cReason>=0&&row[cReason]?String(row[cReason]):'Chưa ghi lý do';
             const amt=cAmt>=0?flmTeamNum_(row[cAmt]):null;
-            lostList.push({shipmentId:shipId,date:d,reason:reason,amount:amt});
-            if(lostList.length>=1000)break;
+            fallbackRows.push({shipmentId:shipId,date:d,reason:reason,amount:amt});
+            if(fallbackRows.length>=1000)break;
           }
+          lostList.push(...fallbackRows);
+          lostComplete=true;
         }
       }
     }catch(_){}
@@ -1124,32 +1723,40 @@ function flmTeamGetHubOrders(request){
   }
   
   // Fallback 1: check cached master rows for lost
-  if(lostList.length===0){
+  if(allowLost&&!supabaseLostComplete&&lostList.length===0){
     try{
-      const masterRows=flmCacheGet_('flm:lost-master-rows:v3:'+ctx.closing+':'+ctx.from);
+      const masterRows=flmCacheGet_(flmLostMasterKey_(ctx));
       if(masterRows&&masterRows.length){
+        const fallbackRows=[];
         masterRows.forEach(r=>{
-          if(r.hubCode===hubCode){
-            lostList.push({shipmentId:'—',date:r.d,reason:r.reason+(r.n>1?' ('+r.n+' đơn)':''),amount:r.amount,count:r.n});
+          if(r.hubCode===hubCode&&flmLostHubCode_(r.station,ctx.aliases)===hubCode){
+            fallbackRows.push({shipmentId:'—',date:r.d,reason:r.reason+(r.n>1?' ('+r.n+' đơn)':''),amount:r.amount,count:r.n});
           }
         });
+        if(fallbackRows.length){lostList.push(...fallbackRows);lostComplete=true;}
       }
     }catch(_){}
   }
   
   // Fallback 2: BigQuery / Mock
-  if(lostList.length===0){
+  if(allowLost&&!supabaseLostComplete&&lostList.length===0){
     try{
       const bqSql='SELECT TO_JSON_STRING(t) FROM (SELECT shipment_id, d, amt, reason, station FROM '+flmTeamTable_('flm_lost_current')+' WHERE mapped AND d BETWEEN @from AND @closing AND '+flmTeamStationSql_('station')+' ORDER BY d DESC LIMIT 1000) t';
-      const bqRows=flmTeamQuery_(bqSql,ctx);
+      const aliases=Object.keys(ctx.aliases).filter(alias=>ctx.aliases[alias]===hubCode);
+      const params=ctx.params.map(p=>p.name==='stations'?Object.assign({},p,{parameterValue:{arrayValues:aliases.map(value=>({value:value}))}}):p);
+      const bqRows=flmTeamQuery_(bqSql,Object.assign({},ctx,{params:params})),fallbackRows=[];
       bqRows.forEach(r=>{
-        const code=flmMatchHubCode_(r.station,masterMap);
-        if(code===hubCode){
-          lostList.push({shipmentId:r.shipment_id||('SPX'+String(hubCode).replace(/\D/g,'')+(r.d||'').replace(/-/g,'')),date:r.d,reason:r.reason||'Chưa ghi lý do',amount:r.amount||r.amt});
+        const code=flmLostHubCode_(r.station,ctx.aliases);
+        const date=flmLostSheetDay_(r.d);
+        if(code===hubCode&&date&&date>=ctx.from&&date<=ctx.closing){
+          fallbackRows.push({shipmentId:r.shipment_id||'—',date:date,reason:r.reason||'Chưa ghi lý do',amount:r.amount??r.amt});
         }
       });
+      lostList.push(...fallbackRows);
+      lostComplete=true;
     }catch(_){}
   }
+  if(allowLost&&!lostComplete)throw Error('LOST_UPSTREAM');
   
   if(urgentList.length===0&&alertList.length===0){
     try{

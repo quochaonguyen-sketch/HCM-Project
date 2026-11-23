@@ -8,7 +8,7 @@ const directory = fs.mkdtempSync(path.join(os.tmpdir(),'hcm-tests-'));
 let failed = false;
 try {
   console.log('HCM tests: isolated synthetic data; no production services.');
-  for(const file of ['check.cjs','runtime.test.cjs','people.test.cjs','hourly.test.cjs','claims-ui.test.cjs']) {
+  for(const file of ['check.cjs','runtime.test.cjs','people.test.cjs','hourly.test.cjs','d0-supabase.test.cjs','d0-ui.test.cjs','claims-ui.test.cjs','lost-server.test.cjs','risk-summary.test.cjs','forecast-supabase.test.cjs','rulebook-ui.test.cjs']) {
     // Each suite gets fresh state so writes cannot leak into other tests.
     const suiteDir=path.join(directory,file);
     fs.mkdirSync(suiteDir);

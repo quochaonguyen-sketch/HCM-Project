@@ -4524,6 +4524,14 @@ function buildForecastStationMatcher_(stations, allowedHubCodes) {
 
 
 function buildForecastModel_() {
+  if (typeof dtcAlertReadFc_ === 'function') {
+    try {
+      const fcSource = dtcAlertReadFc_(null, false);
+      if (fcSource && fcSource.values && fcSource.values.length > 2) {
+        return buildForecastModelFromWideFc_(null, null, fcSource.values);
+      }
+    } catch (_) {}
+  }
   const ss = getDb_();
   const sheet = findForecastSheet_(ss);
 
@@ -4617,6 +4625,63 @@ function buildForecastModel_() {
       lmSocTransported: forecastNumber_(raw[ci('lmSocTransported')], disp[ci('lmSocTransported')])
     });
   }
+
+  // Supplement missing/future dates from FC plan (Supabase or FC monthly sheets)
+  try {
+    const fcSource = typeof dtcAlertReadFc_ === 'function' ? dtcAlertReadFc_(ss, false) : null;
+    if (fcSource && Array.isArray(fcSource.values) && fcSource.values.length > 2) {
+      const fcRow0 = fcSource.values[0] || [], fcRow1 = fcSource.values[1] || [];
+      const fcCols = [];
+      let curD = '';
+      for (let c = 1; c < fcRow0.length; c++) {
+        const d = forecastDateKey_(null, fcRow0[c]);
+        if (d) curD = d;
+        if (!curD) continue;
+        const tag = String(fcRow1[c] || '').replace(/[\s#_]/g, '').toLowerCase();
+        const isLm = tag === 'lmforecast' || tag === 'forecastlm';
+        const isFm = tag === 'fmforecast' || tag === 'forecastfm';
+        if (isLm || isFm) fcCols.push({ col: c, date: curD, isLm: isLm });
+      }
+      const fcDates = {};
+      fcCols.forEach(function(ci) {
+        if (!fcDates[ci.date]) fcDates[ci.date] = {};
+        if (ci.isLm) fcDates[ci.date].lm = ci.col;
+        else fcDates[ci.date].fm = ci.col;
+      });
+      Object.keys(fcDates).sort().forEach(function(dt) {
+        if (dateSet[dt]) return;
+        dateSet[dt] = true;
+        const cols = fcDates[dt];
+        for (let r = 2; r < fcSource.values.length; r++) {
+          const hubName = String(fcSource.values[r][0] || '').trim();
+          if (!hubName) continue;
+          const matched = stationMatcher.resolve(hubName);
+          const fmVal = Number(fcSource.values[r][cols.fm]) || 0;
+          const lmVal = Number(fcSource.values[r][cols.lm]) || 0;
+          rows.push({
+            rowNumber: rows.length + 1,
+            dateKey: dt,
+            region: matched ? (matched.region || '') : '',
+            province: matched ? (matched.province || '') : '',
+            sourceHubName: hubName,
+            hubCode: matched ? matched.hubCode : '',
+            hubName: matched ? matched.hubName : hubName,
+            zone: matched ? (matched.zone || '') : '',
+            district: matched ? (matched.district || '') : '',
+            fmForecast: fmVal,
+            fmInbound: 0,
+            fmDifferenceSource: null,
+            pickupDone: 0,
+            lmForecast: lmVal,
+            lmInbound: 0,
+            lmDifferenceSource: null,
+            lmLhArrived: 0,
+            lmSocTransported: 0
+          });
+        }
+      });
+    }
+  } catch(_) {}
 
   return {
     sheetFound: true,
@@ -11621,53 +11686,45 @@ function deployReadRows_(db, name) {
       if (!key) return;
       const value = row[i];
       result[key] = value instanceof Date
-        ? Utilities.formatDate(value,'Asia/Ho_Chi_Minh',key==='hour'?'HH:mm':/fetched|captured|computed|^datetime$/i.test(key)?"yyyy-MM-dd'T'HH:mm:ssXXX":'yyyy-MM-dd')
+        ? Utilities.formatDate(value,'Asia/Ho_Chi_Minh',key==='hour'?'HH:mm':/fetched|captured|computed|^datetime$|^first_clock_in$/i.test(key)?"yyyy-MM-dd'T'HH:mm:ssXXX":'yyyy-MM-dd')
         : value == null ? null : value;
     });
     return result;
   });
 }
-function workspaceD0Rows_(access, section) {
+function workspaceD0Rows_(access, section, force) {
   const names = section ? d0SectionSheets_(section) : d0SectionSheets_();
   if (!section || section === 'attendance') names.push('BigQuery Attendance');
-  return workspaceD0NamedRows_(access,names);
+  return workspaceD0NamedRows_(access,names,force);
 }
-function workspaceD0NamedRows_(access, names) {
-  const id = PropertiesService.getScriptProperties().getProperty('D0_DB_SHEET_ID');
-  if (!id) throw Error('D0_DB_SHEET_ID is not configured.');
-  const catalog = deployHubCatalog_(access,getPermissionModel_(false));
-  const key = function(v){return String(v||'').trim().toLowerCase().replace(/(?:\s+hub)+$/i,'').replace(/\s+/g,' ')};
-  const aliases = {};
-  catalog.forEach(function(h){aliases[key(h.code)]=h;aliases[key(h.name)]=h});
-  const db = SpreadsheetApp.openById(id), sheets = {};
-  names.forEach(function(name){
-    sheets[name]=deployReadRows_(db,name).flatMap(function(row){
-      const hub=aliases[key(row.hub_code)]||aliases[key(row.station_name)];
-      return hub ? [Object.assign({},row,{hub_code:hub.code,zone:hub.zone,aom:hub.aom,sup:hub.sup})] : [];
-    });
-  });
-  return {sheets:sheets,hubCatalog:catalog,access:toPublicAccess_(access,getPermissionModel_(false)),generatedAt:new Date().toISOString()};
+function workspaceD0NamedRows_(access, names, force) {
+  return d0WorkspaceSnapshot_(access,names,force);
 }
 function getD0Snapshot(force, section) {
   if (section === 'hourly') return getD0HourlySnapshot(force);
   const access = requireAccess_(['dashboard','d0']);
   if (access.rank === 'NORMAL') throw Error('ACCESS_DENIED');
-  const snapshot = d0SummarySnapshot_(workspaceD0Rows_(access,section));
+  const snapshot = d0SummarySnapshot_(workspaceD0Rows_(access,section,force));
   return section ? d0SnapshotSection_(snapshot,section) : snapshot;
 }
 // Separate RPC: independent of legacy D0 section registries and summary filters.
 function getD0HourlySnapshot(force) {
   const access = requireAccess_(['dashboard','d0']);
   if (access.rank === 'NORMAL') throw Error('ACCESS_DENIED');
-  const snapshot = workspaceD0NamedRows_(access,['Throughput Hourly D0']);
+  const snapshot = workspaceD0NamedRows_(access,['Throughput Hourly D0'],force);
   snapshot.sheets['Throughput Hourly D0'] = d0HourlyRows_(snapshot.sheets['Throughput Hourly D0'] || []);
   return Object.assign({},snapshot,{section:'hourly',summaryOnly:true,cacheSeconds:60,apiVersion:'d0-hourly-v2'});
 }
 function getD0Riders(code,page,sort,direction,force,query) {
   const access = requireAccess_(['d0']);
   assertScopeAccess_(access,'HUB',code);
-  const snapshot=workspaceD0Rows_(access,'delivery');
-  return d0RiderPage_((snapshot.sheets['Delivery Progress D0']||[]).filter(function(r){return String(r.hub_code)===String(code)}),page,sort,direction,query);
+  const snapshot=workspaceD0Rows_(access,'delivery',force);
+  const target = String(code || '').trim().toLowerCase();
+  return d0RiderPage_((snapshot.sheets['Delivery Progress D0']||[]).filter(function(r){
+    return String(r.hub_code || '').trim().toLowerCase() === target ||
+           String(r.station_id || '').trim().toLowerCase() === target ||
+           String(r.station_name || '').trim().toLowerCase() === target;
+  }),page,sort,direction,query);
 }
 function getAccessDirectory() {
   requireAdmin_();

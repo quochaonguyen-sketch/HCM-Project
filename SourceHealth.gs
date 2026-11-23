@@ -7,13 +7,14 @@ function getSourceHealth() {
 
 function getSourceHealthInternal_() {
   const now=new Date(),books={},props=PropertiesService.getScriptProperties();
+  const d0Sources=d0SupabaseSources_();
   const specs=[
     {name:'Permission',book:'app',kind:'config'},
     {name:'KPI Result',book:'app',kind:'daily',dates:['As Of']},
     {name:'kpis daily archive',fallback:'KPI Daily',book:'daily',kind:'daily',dates:['KPI Date','Date','Ngày','date_iso']},
     ...['FM vol','LM vol','Correct SOP vol','Deli success vol'].map(name=>({name:name,book:'daily',kind:'daily',dates:['Date']})),
     ...['Rider Prod','sort prod 2'].map(name=>({name:name,book:'daily',kind:'daily',wide:true,dates:['Date']})),
-    ...['FM Order Volume D0','LM Backlog D0','LM Order Volume D0','Delivery Progress D0','Roster D0','Roster Shifts D0','Backlog D0','FM Pending Pickup Backlog D0'].map(name=>({name:name,book:'d0',kind:'live',dates:['fetched_at']})),
+    ...Object.keys(d0Sources).map(name=>({name:name,book:'d0',kind:'live',dates:['fetched_at'],supabase:d0Sources[name]})),
     {name:'Backlog EOD',book:'d0',kind:'eod',dates:['snapshot_date']},
     {name:'DTC',fallback:'DTC D0',book:'d0',kind:'daily',dtc:true,dates:['window_end']}
   ];
@@ -29,10 +30,25 @@ function getSourceHealthInternal_() {
     if(books[key].error)throw Error(books[key].error);
     return books[key].db;
   }
+  let d0Context;
   const sources=specs.map(spec=>{
     const module=['KPI Result','kpis daily archive'].indexOf(spec.name)>=0?'KPI':spec.name==='DTC'?'DTC':spec.kind==='live'?'D0':'';
     const base={name:spec.name,module:module,group:spec.book,kind:spec.kind,status:'ERROR',expected:spec.kind==='live'?'Cùng ngày · tối đa 120 phút':spec.kind==='config'?'Có dữ liệu cấu hình':'Đủ dữ liệu đến D−1',url:''};
     try{
+      if(spec.supabase&&!d0LocalSheets_(props)){
+        if(!d0Context){
+          const config=d0SupabaseConfig_(props),permission=getPermissionModel_(false);
+          const catalog=deployHubCatalog_({isAdmin:true},permission);
+          const aliases=d0HubAliases_(catalog,permission);
+          const names=new Map(catalog.map(hub=>[hub.code,hub.name]));
+          d0Context={config,aliases,names,filters:d0SupabaseStationFilters_(aliases)};
+        }
+        base.actualSheet=spec.supabase.table;
+        const rows=d0SupabaseRows_(spec.supabase,d0Context.config,d0Context.aliases,d0Context.filters,true);
+        if(!rows.length)return Object.assign(base,{status:'EMPTY',rows:0,reason:'Supabase chưa có dữ liệu trong phạm vi HUB.'});
+        const values=[['HUB Code','Station Name','fetched_at'],...rows.map(row=>[row.hub_code,d0Context.names.get(row.hub_code),row.fetched_at])];
+        return Object.assign(base,sourceHealthAssess_(values,spec,now));
+      }
       const db=book(spec.book);let sheet=db.getSheetByName(spec.name);
       if(!sheet&&spec.fallback)sheet=db.getSheetByName(spec.fallback);
       base.url='https://docs.google.com/spreadsheets/d/'+encodeURIComponent(db.getId())+'/edit'+(sheet?'#gid='+sheet.getSheetId():'');
@@ -47,7 +63,7 @@ function getSourceHealthInternal_() {
   return {checkedAt:now.toISOString(),today:sourceHealthDay_(now),timezone:'Asia/Ho_Chi_Minh',modules:sourceHealthSummaries_(sources,now),sources:sources,attention:sources.filter(s=>s.status!=='ACTIVE'&&s.status!=='CONFIGURED').length};
 }
 function sourceHealthSummaries_(sources,now){
-  const today=sourceHealthDay_(now),definitions=[{key:'KPI',expectedLagDays:1,expectedSources:2},{key:'D0',expectedLagDays:0,expectedSources:8},{key:'DTC',expectedLagDays:1,expectedSources:1}];
+  const today=sourceHealthDay_(now),definitions=[{key:'KPI',expectedLagDays:1,expectedSources:2},{key:'D0',expectedLagDays:0,expectedSources:Object.keys(d0SupabaseSources_()).length},{key:'DTC',expectedLagDays:1,expectedSources:1}];
   return definitions.map(def=>{
     const rows=sources.filter(s=>s.module===def.key),dates=rows.map(s=>s.latestDate).filter(d=>/^\d{4}-\d{2}-\d{2}$/.test(String(d||''))).sort();
     const date=dates[0]||null,lag=date?Math.round((Date.parse(today+'T00:00:00Z')-Date.parse(date+'T00:00:00Z'))/86400000):null;
@@ -99,8 +115,9 @@ function sourceHealthAssess_(values,spec,now){
     const reportIndex=headers.indexOf('reportdate'),reports=rows.map(r=>sourceHealthStamp_(r[reportIndex])).filter(isFinite);
     if(reports.length){const latestReport=reports.reduce((a,b)=>Math.max(a,b),-Infinity);rows=rows.filter(r=>sourceHealthStamp_(r[reportIndex])===latestReport)}
   }
-  let hub=headers.indexOf('stationname');if(hub<0)hub=headers.indexOf('hubcode');if(hub<0)hub=headers.indexOf('stationid');
-  const groups={},today=sourceHealthDay_(now),expected=sourceHealthDay_(new Date(+now-86400000));
+  const hubName=headers.indexOf('stationname'),hubCode=headers.indexOf('hubcode');
+  const hub=(spec.supabase&&hubCode>=0?hubCode:hubName>=0?hubName:hubCode>=0?hubCode:headers.indexOf('stationid'));
+  const groups=Object.create(null),today=sourceHealthDay_(now),expected=sourceHealthDay_(new Date(+now-86400000));
   const metrics=headers.map((h,i)=>h.indexOf('%')===0?i:-1).filter(i=>i>=0);
   let invalid=0,future=0;
   rows.forEach((row,i)=>{
@@ -118,7 +135,7 @@ function sourceHealthAssess_(values,spec,now){
     if(!isFinite(stamp)){invalid++;return}
     if(stamp>+now+300000){future++;return}
     const key=hub>=0?String(row[hub]||'row:'+i):'source';
-    if(!groups[key]||groups[key].stamp<stamp)groups[key]={stamp:stamp,row:row,hub:key};
+    if(!groups[key]||groups[key].stamp<stamp)groups[key]={stamp:stamp,row:row,hub:hubName>=0?String(row[hubName]||key):key};
   });
   const items=Object.keys(groups).map(k=>groups[k]);
   if(!items.length)return {status:'ERROR',rows:rows.length,reason:future?'Ngày cập nhật nằm trong tương lai.':'Không có ngày cập nhật hợp lệ.'};

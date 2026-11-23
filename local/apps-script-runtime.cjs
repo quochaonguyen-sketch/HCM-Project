@@ -3,8 +3,76 @@ const path = require('node:path');
 const vm = require('node:vm');
 const crypto = require('node:crypto');
 const zlib = require('node:zlib');
+const cp = require('node:child_process');
+const { Worker } = require('node:worker_threads');
 const { sources, read } = require('./source.cjs');
 const dataDir = process.env.HCM_LOCAL_DATA_DIR || __dirname;
+
+let syncWorker = null;
+let syncSab = null;
+let syncInt32 = null;
+
+function getSyncWorker() {
+  if (!syncWorker) {
+    syncSab = new SharedArrayBuffer(10 * 1024 * 1024);
+    syncInt32 = new Int32Array(syncSab);
+    const workerPath = path.resolve(__dirname, 'sync-fetch-worker.cjs');
+    syncWorker = new Worker(workerPath, { workerData: { sab: syncSab } });
+    syncWorker.unref();
+  }
+  return { syncWorker, sab: syncSab, int32: syncInt32 };
+}
+
+function syncFetch(url, options = {}) {
+  if (url.includes('example.test') || url.includes('synthetic-d0') || !/^https?:\/\//i.test(url)) {
+    return {
+      getResponseCode: () => 200,
+      getContentText: () => JSON.stringify({ code: 0, msg: 'ok' }),
+      getHeaders: () => ({}),
+      getBlob: () => blob('')
+    };
+  }
+  try {
+    const { syncWorker: w, sab, int32 } = getSyncWorker();
+    int32[0] = 0;
+    w.postMessage({ url, options });
+    Atomics.wait(int32, 0, 0);
+    const len = int32[1];
+    const status = int32[2];
+    const text = Buffer.from(sab, 16, len).toString('utf8');
+    if (status >= 400 && !options.muteHttpExceptions) {
+      throw Error('Request failed for ' + url + ' returned code ' + status + '. Server response: ' + text);
+    }
+    return {
+      getResponseCode: () => status,
+      getContentText: () => text,
+      getHeaders: () => ({}),
+      getBlob: () => blob(text)
+    };
+  } catch (err) {
+    const method = (options.method || 'GET').toUpperCase();
+    const headers = options.headers || {};
+    const args = ['-s', '-S', '-w', '\n__HTTP_STATUS__:%{http_code}', '-X', method];
+    for (const [k, v] of Object.entries(headers)) args.push('-H', k + ': ' + v);
+    if (options.payload) args.push('-d', typeof options.payload === 'string' ? options.payload : JSON.stringify(options.payload));
+    args.push(url);
+    const res = cp.spawnSync('curl', args, { maxBuffer: 50 * 1024 * 1024 });
+    if (res.error) throw res.error;
+    const raw = res.stdout.toString('utf8');
+    const splitIdx = raw.lastIndexOf('\n__HTTP_STATUS__:');
+    const body = splitIdx !== -1 ? raw.slice(0, splitIdx) : raw;
+    const status = splitIdx !== -1 ? parseInt(raw.slice(splitIdx + 17).trim(), 10) : 200;
+    if (status >= 400 && !options.muteHttpExceptions) {
+      throw Error('Request failed for ' + url + ' returned code ' + status + '. Server response: ' + body);
+    }
+    return {
+      getResponseCode: () => status,
+      getContentText: () => body,
+      getHeaders: () => ({}),
+      getBlob: () => blob(body)
+    };
+  }
+}
 
 function createRuntime() {
   const file = path.join(dataDir,'workbooks.private.json');
@@ -46,8 +114,30 @@ function createRuntime() {
   function blob(v){const b=Buffer.isBuffer(v)?v:Buffer.from(Array.isArray(v)?v:String(v??''));return {getBytes:()=>[...b],getDataAsString:()=>b.toString('utf8')};}
   function formatDate(value,tz,pattern){
     const d=new Date(value);if(!isFinite(+d))return '';
-    const parts=Object.fromEntries(new Intl.DateTimeFormat('en-GB',{timeZone:tz||'Asia/Ho_Chi_Minh',year:'numeric',month:'2-digit',day:'2-digit',hour:'2-digit',minute:'2-digit',second:'2-digit',hourCycle:'h23'}).formatToParts(d).map(p=>[p.type,p.value]));
-    return pattern.replace(/'([^']*)'|yyyy|MMMM|MMM|MM|dd|HH|mm|ss|XXX|Z/g,(token,literal)=>literal!==undefined?literal:({yyyy:parts.year,MM:parts.month,dd:parts.day,HH:parts.hour,mm:parts.minute,ss:parts.second,XXX:'+07:00',Z:'+0700',MMM:new Intl.DateTimeFormat('en-US',{timeZone:tz,month:'short'}).format(d),MMMM:new Intl.DateTimeFormat('en-US',{timeZone:tz,month:'long'}).format(d)})[token]);
+    const vnMs=+d+25200000;
+    const vn=new Date(vnMs);
+    const yyyy=vn.getUTCFullYear();
+    const MM=String(vn.getUTCMonth()+1).padStart(2,'0');
+    const dd=String(vn.getUTCDate()).padStart(2,'0');
+    const HH=String(vn.getUTCHours()).padStart(2,'0');
+    const mm=String(vn.getUTCMinutes()).padStart(2,'0');
+    const ss=String(vn.getUTCSeconds()).padStart(2,'0');
+    return pattern.replace(/'([^']*)'|yyyy|MMMM|MMM|MM|dd|HH|mm|ss|XXX|Z/g,(token,literal)=>{
+      if(literal!==undefined)return literal;
+      switch(token){
+        case 'yyyy':return yyyy;
+        case 'MM':return MM;
+        case 'dd':return dd;
+        case 'HH':return HH;
+        case 'mm':return mm;
+        case 'ss':return ss;
+        case 'XXX':return '+07:00';
+        case 'Z':return '+0700';
+        case 'MMM':return new Intl.DateTimeFormat('en-US',{timeZone:tz||'Asia/Ho_Chi_Minh',month:'short'}).format(d);
+        case 'MMMM':return new Intl.DateTimeFormat('en-US',{timeZone:tz||'Asia/Ho_Chi_Minh',month:'long'}).format(d);
+        default:return '';
+      }
+    });
   }
   const noOpChain=new Proxy({}, {get:(_,k)=>k==='then'?undefined:()=>noOpChain});
   class Sheet {
@@ -89,7 +179,7 @@ function createRuntime() {
     CacheService:{getScriptCache:()=>cacheApi,getUserCache:()=>cacheApi,getDocumentCache:()=>cacheApi},
     LockService:{getScriptLock:()=>({tryLock:()=>true,waitLock(){},releaseLock(){}}),getDocumentLock:()=>({tryLock:()=>true,waitLock(){},releaseLock(){}})},
     Utilities:{formatDate,getUuid:()=>crypto.randomUUID(),sleep(){},newBlob:blob,gzip:v=>blob(zlib.gzipSync(Buffer.from(v.getBytes()))),ungzip:v=>blob(zlib.gunzipSync(Buffer.from(v.getBytes()))),base64Encode:v=>Buffer.from(v).toString('base64'),base64Decode:v=>[...Buffer.from(v,'base64')],base64EncodeWebSafe:v=>Buffer.from(v).toString('base64url'),DigestAlgorithm:{SHA_256:'sha256'},Charset:{UTF_8:'UTF-8'},computeDigest:(algo,value)=>[...crypto.createHash(algo).update(String(value)).digest()]},
-    UrlFetchApp:{fetch:(url,opt)=>({getResponseCode:()=>200,getContentText:()=>JSON.stringify({code:0,msg:'ok'})})},
+    UrlFetchApp:{fetch:syncFetch},
     ScriptApp:(function(){
       let triggers=[];
       return {
@@ -115,7 +205,7 @@ function createRuntime() {
     call(method,args=[]){
       if(!apiNames.has(method))throw Error('LOCAL_API_UNAVAILABLE: '+method);
       context.__rpcMethod=method;context.__rpcArgs=args;
-      return vm.runInContext('globalThis[__rpcMethod].apply(null,__rpcArgs)',context,{timeout:25000});
+      return vm.runInContext('globalThis[__rpcMethod].apply(null,__rpcArgs)',context,{timeout:120000});
     }
   };
 }

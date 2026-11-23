@@ -3,9 +3,31 @@ const fs = require('node:fs');
 const path = require('node:path');
 const { read } = require('./source.cjs');
 const { createRuntime, dataDir } = require('./apps-script-runtime.cjs');
+function localSupabaseConfig() {
+  const envPath = path.join(__dirname, '..', '.env');
+  let secretKey = process.env.SUPABASE_KEY || process.env.D0_SUPABASE_SECRET_KEY || '';
+  if (!secretKey && fs.existsSync(envPath)) {
+    const match = fs.readFileSync(envPath, 'utf8').match(/^SUPABASE_KEY=([^\r\n]+)/m);
+    if (match) secretKey = match[1].trim();
+  }
+  return {
+    url: process.env.D0_SUPABASE_URL || 'https://aqvcybxcfgicxmzpczgd.supabase.co',
+    secretKey
+  };
+}
 let runtime;
 function getRuntime() {
-  if (!runtime) runtime = createRuntime();
+  if (!runtime) {
+    runtime = createRuntime();
+    const { url, secretKey } = localSupabaseConfig();
+    if (secretKey) {
+      const props = runtime.context.PropertiesService.getScriptProperties();
+      props.setProperty('D0_SUPABASE_URL', url);
+      props.setProperty('D0_SUPABASE_SECRET_KEY', secretKey);
+      props.setProperty('SUPABASE_LOST_SECRET_KEY', secretKey);
+      runtime.context.ScriptApp.getScriptId = () => 'local-server';
+    }
+  }
   return runtime;
 }
 function localSupabaseKey() {
@@ -25,9 +47,11 @@ function page() {
   if (/<\?/.test(html)) throw Error('Unresolved Apps Script template expression');
   // Initialize the Apps Script adapter synchronously in the document. The UI
   // starts immediately and must not depend on a separate script request.
+  const { secretKey } = localSupabaseConfig();
   const bridge = 'window.__LOCAL_DATA__ = ' + JSON.stringify({
     mode:app.provenance.mode,hubs:app.provenance.hubs,mockCellsAndRows:app.provenance.mockCellsAndRows,
-    supabasePublishableKey:localSupabaseKey()
+    supabasePublishableKey:localSupabaseKey(),
+    d0Source: secretKey ? 'supabase' : 'mock'
   }).replace(/</g,'\\u003c') + ';\n' + fs.readFileSync(path.join(__dirname, 'bridge.js'), 'utf8');
   return html.replace('<head>', () => '<head><script data-local-bridge>' + bridge + '</script>');
 }

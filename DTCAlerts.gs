@@ -52,9 +52,9 @@ function getDtcAlerts(forceRefresh){
   catch(err){return Object.assign({},actual,{forecast:{status:'ERROR',message:'LM Forecast could not be read. Check the FC sheet and its two header rows.',dates:[],today:today,source:'Backend · FC · #LM Forecast'},hubs:actual.hubs.map(h=>Object.assign({},h,{forecast:[]}))})}
 }
 function dtcFcSheetSortKey_(name){
-  const m=String(name||'').match(/(?:T|M|\b)\s*(\d{1,2})[\/\-_](\d{2,4})/i);
+  const m=String(name||'').match(/(?:T|M|\b)\s*(\d{1,2})(?:[\/\-_](\d{2,4})|(\d{2}))/i);
   if(m){
-    let month=Number(m[1]),year=Number(m[2]);
+    let month=Number(m[1]),year=Number(m[2]||m[3]);
     if(year<100)year+=2000;
     return year*100+month;
   }
@@ -167,8 +167,82 @@ function dtcMergeFcSheets_(sheetsData){
 
   return mergedRows;
 }
+function dtcAlertReadFcFromSupabase_(props,force){
+  const url=String(props.getProperty('D0_SUPABASE_URL')||props.getProperty('SUPABASE_URL')||'').trim().replace(/\/$/,'');
+  const key=String(props.getProperty('D0_SUPABASE_SECRET_KEY')||props.getProperty('SUPABASE_LOST_SECRET_KEY')||props.getProperty('SUPABASE_KEY')||'').trim();
+  if(!url||!key)return null;
+  const cacheKey='dtc-fc-supabase-v1';
+  if(!force)try{
+    const cached=CacheService.getScriptCache().get(cacheKey);
+    if(cached)return JSON.parse(Utilities.ungzip(Utilities.newBlob(Utilities.base64Decode(cached))).getDataAsString('UTF-8'));
+  }catch(_){}
+
+  try{
+    let rows=[],offset=0;
+    while(true){
+      const res=UrlFetchApp.fetch(url+'/rest/v1/forecast_daily?select=plan_date,hub_name,hub_code,fm_forecast,lm_forecast&order=plan_date.desc,hub_name.asc&limit=1000&offset='+offset,{
+        method:'get',
+        headers:{apikey:key,Authorization:'Bearer '+key},
+        muteHttpExceptions:true
+      });
+      if(res.getResponseCode()!==200)break;
+      const batch=JSON.parse(res.getContentText());
+      if(!Array.isArray(batch)||!batch.length)break;
+      rows.push(...batch);
+      if(batch.length<1000)break;
+      offset+=1000;
+    }
+    if(!rows.length)return null;
+
+    const dateSet=new Set();
+    const byHub=new Map();
+    rows.forEach(function(r){
+      const d=String(r.plan_date||'').slice(0,10);
+      if(d)dateSet.add(d);
+      const name=String(r.hub_name||r.hub_code||'').trim();
+      if(!name)return;
+      if(!byHub.has(name))byHub.set(name,new Map());
+      byHub.get(name).set(d,{fm:Number(r.fm_forecast)||0,lm:Number(r.lm_forecast)||0});
+    });
+
+    const dates=Array.from(dateSet).sort().reverse();
+    if(!dates.length)return null;
+
+    const row0=['Hub Name'];
+    const row1=[''];
+    dates.forEach(function(d){
+      row0.push(d,'');
+      row1.push('#FM Forecast','#LM Forecast');
+    });
+
+    const matrix=[row0,row1];
+    byHub.forEach(function(data,hubName){
+      const hubRow=[hubName];
+      dates.forEach(function(d){
+        const val=data.get(d)||{fm:0,lm:0};
+        hubRow.push(val.fm,val.lm);
+      });
+      matrix.push(hubRow);
+    });
+
+    const result={values:matrix,sheetNames:['Supabase:forecast_daily'],checkedAt:new Date().toISOString()};
+    try{
+      const val=Utilities.base64Encode(Utilities.gzip(Utilities.newBlob(JSON.stringify(result),'application/json')).getBytes());
+      if(val.length<90000)CacheService.getScriptCache().put(cacheKey,val,300);
+    }catch(_){}
+    return result;
+  }catch(_){
+    return null;
+  }
+}
+
 function dtcAlertReadFc_(db,force){
   const props=PropertiesService.getScriptProperties();
+  try{
+    const supa=dtcAlertReadFcFromSupabase_(props,force);
+    if(supa&&supa.values&&supa.values.length>2)return supa;
+  }catch(_){}
+
   const customId=props.getProperty('DTC_FC_SHEET_ID');
   const appId=props.getProperty('APP_DB_SHEET_ID');
   const d0Id=props.getProperty('D0_DB_SHEET_ID');

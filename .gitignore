@@ -28,4 +28,9 @@ local/fm-pending.test.cjs
 local/people-sheets.test.cjs
 local/seatalk.test.cjs
 .taste-skill/
+.specify/
+specs/
+skills-lock.json
+.agents/skills/openspec-*
+.agents/skills/speckit-*
 

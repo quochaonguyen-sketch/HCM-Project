@@ -28,9 +28,14 @@
   document.addEventListener('DOMContentLoaded', function () {
     var badge = document.createElement('div');
     var info=window.__LOCAL_DATA__||{};
-    badge.textContent = 'LOCAL · Excel + MOCK · '+(info.hubs||0)+' HUBs'+(info.supabasePublishableKey?' · Supabase REST':'');
-    badge.title = 'Dữ liệu từ hai file Excel. Các ô/dòng thiếu và nguồn BigQuery dùng MOCK. Xem /api/local-data để kiểm tra nguồn.';
-    badge.style.cssText = 'position:fixed;bottom:0;left:0;right:0;z-index:2147483647;background:#9a3412;color:white;text-align:center;font:12px Arial;padding:5px;pointer-events:none';
+    var isLive = info.d0Source === 'supabase';
+    badge.textContent = isLive
+      ? 'LOCAL · Live Supabase D0 · '+(info.hubs||0)+' HUBs · Supabase REST'
+      : 'LOCAL · Excel + MOCK · '+(info.hubs||0)+' HUBs'+(info.supabasePublishableKey?' · Supabase REST':'');
+    badge.title = isLive
+      ? 'Dữ liệu D0 và Forecast kết nối trực tiếp với Supabase REST API thời gian thực.'
+      : 'Dữ liệu từ hai file Excel. Các ô/dòng thiếu và nguồn BigQuery dùng MOCK. Xem /api/local-data để kiểm tra nguồn.';
+    badge.style.cssText = 'position:fixed;bottom:0;left:0;right:0;z-index:2147483647;background:'+(isLive?'#047857':'#9a3412')+';color:white;text-align:center;font:12px Arial;padding:5px;pointer-events:none';
     document.body.appendChild(badge);
   });
 })();
